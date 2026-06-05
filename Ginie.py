@@ -4,6 +4,14 @@ Ginie — offline USB desktop pet + AI assistant
 deps: python3-gi python3-gi-cairo pillow  (all pre-installed on Ubuntu)
 run:  python3 Ginie.py
 """
+# CRITICAL: Wayland forbids clients from positioning their own windows —
+# gtk_window_move() is a silent no-op there, which freezes the pet on one spot
+# (drag still works because that's compositor-mediated). Force the X11/XWayland
+# backend BEFORE GTK loads so autonomous wandering + z-zoom work on GNOME Wayland
+# and native X11 alike. setdefault => respects an explicit user override.
+import os
+os.environ.setdefault('GDK_BACKEND', 'x11')
+
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
