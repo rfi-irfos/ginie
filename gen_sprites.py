@@ -129,41 +129,49 @@ def draw_head(draw, cx, cy):
     ell(draw, cx + r + 3, cy + 15, 2, 2, GOLD_LIGHT)
 
 def draw_face(draw, cx, cy):
-    # Eyebrows — thick arched
-    for bx0 in [cx - 16, cx + 4]:
-        for j in range(10):
-            arch = int((j - 4.5) ** 2 * 0.22)
-            ell(draw, bx0 + j, cy - 11 - arch, 2, 2, BROW)
+    # Eyebrows — gently arched, relaxed (not raised in shock)
+    for bx0, flip in [(cx - 15, 1), (cx + 5, -1)]:
+        for j in range(8):
+            arch = int((j - 3.5) ** 2 * 0.18)
+            ell(draw, bx0 + j, cy - 10 - arch, 2, 2, BROW)
 
-    # Big Disney eyes
+    # Eyes — half-lidded, cool/relaxed (not wide-open shocked)
     for ex in [cx - 9, cx + 9]:
-        ell(draw, ex, cy - 3, 7, 7, EYE_WHITE)
-        ell(draw, ex, cy - 3, 5, 5, EYE_IRIS)
-        ell(draw, ex + 1, cy - 3, 3, 3, EYE_PUPIL)
-        ell(draw, ex - 2, cy - 6, 2, 2, (255, 255, 255, 210))
-        ell(draw, ex + 2, cy - 1, 1, 1, (255, 255, 255, 150))
-        draw.line([(ex - 5, cy + 3), (ex + 5, cy + 3)], fill=BROW, width=1)
+        # eye white — slightly smaller, oval not circle
+        ell(draw, ex, cy - 2, 6, 5, EYE_WHITE)
+        # iris
+        ell(draw, ex, cy - 2, 4, 4, EYE_IRIS)
+        # pupil
+        ell(draw, ex + 1, cy - 2, 2, 2, EYE_PUPIL)
+        # shine
+        ell(draw, ex - 1, cy - 4, 1, 1, (255, 255, 255, 220))
+        # upper eyelid — covers top third of eye = relaxed/half-lidded look
+        draw.line([(ex - 6, cy - 5), (ex + 6, cy - 5)], fill=BROW, width=2)
+        draw.line([(ex - 5, cy - 6), (ex + 5, cy - 6)], fill=BROW, width=1)
 
-    # Nose bulb
-    ell(draw, cx + 4, cy + 5, 5, 4, BODY_LIGHT)
-    ell(draw, cx + 4, cy + 5, 3, 3, BODY_MID)
-    draw.point((cx + 3, cy + 4), fill=BODY_BRIGHT)
+    # Nose — small rounded bulb
+    ell(draw, cx + 3, cy + 5, 5, 4, BODY_LIGHT)
+    ell(draw, cx + 3, cy + 5, 3, 3, BODY_MID)
 
-    # Wide smile with teeth
-    sy = cy + 12
-    for dx in range(-10, 11):
-        draw.point((cx + dx, sy + 5 + int(dx * dx * 0.045)), fill=LIP)
-    draw.line([(cx - 10, sy - 2), (cx + 10, sy - 2)], fill=LIP, width=2)
-    ell(draw, cx, sy + 1, 9, 4, TEETH)
-    for tx in [cx - 3, cx + 3]:
-        draw.line([(tx, sy - 1), (tx, sy + 4)], fill=(*LIP[:3], 70), width=1)
+    # Friendly closed smirk — no gaping mouth
+    sy = cy + 11
+    # lower lip curve
+    for dx in range(-8, 9):
+        curve = int(dx * dx * 0.055)
+        draw.point((cx + dx, sy + 3 + curve), fill=LIP)
+    # upper lip line — straight with slight upturn at corners
+    for dx in range(-8, 9):
+        upturn = int(abs(dx) * 0.3)
+        draw.point((cx + dx, sy - upturn), fill=LIP)
+    # small visible teeth strip — understated
+    ell(draw, cx, sy + 1, 6, 3, TEETH)
 
     # Goatee
-    for dy in range(7):
-        bw = max(0, 4 - abs(dy - 2))
+    for dy in range(6):
+        bw = max(0, 3 - abs(dy - 2))
         for dx in range(-bw, bw + 1):
-            a = max(70, BEARD[3] - dy * 22)
-            draw.point((cx + dx, sy + 7 + dy), fill=(*BEARD[:3], a))
+            a = max(60, BEARD[3] - dy * 25)
+            draw.point((cx + dx, sy + 5 + dy), fill=(*BEARD[:3], a))
 
 # ── sash ──────────────────────────────────────────────────────────────────────
 
