@@ -70,6 +70,26 @@ def _release_lock():
     except Exception:
         pass
 
+def virtual_desktop_size():
+    """Full virtual-desktop extent across all monitors (non-deprecated).
+    Replaces Gdk.Screen.get_width/height, which only report the union via a
+    deprecated API. Falls back to Screen if monitor enumeration fails."""
+    try:
+        display = Gdk.Display.get_default()
+        n = display.get_n_monitors()
+        if n > 0:
+            right = bottom = 0
+            for i in range(n):
+                g = display.get_monitor(i).get_geometry()
+                right  = max(right,  g.x + g.width)
+                bottom = max(bottom, g.y + g.height)
+            if right and bottom:
+                return right, bottom
+    except Exception:
+        pass
+    s = Gdk.Screen.get_default()
+    return s.get_width(), s.get_height()
+
 # ---------------------------------------------------------------------------
 # CSS dark theme
 # ---------------------------------------------------------------------------
@@ -164,26 +184,49 @@ def _model_available():
     except Exception:
         return False
 
+def _usb_has_model(usb_models, model):
+    """True if the portable store actually carries this model's manifest."""
+    name, _, tag = model.partition(":")
+    tag = tag or "latest"
+    manifest = os.path.join(usb_models, "manifests", "registry.ollama.ai",
+                            "library", name, tag)
+    return os.path.isfile(manifest)
+
+def _model_size_hint(name):
+    """Rough param-size from a model name ('qwen3:0.6b' -> 0.6); smaller = faster."""
+    m = re.search(r'(\d+(?:\.\d+)?)\s*b', name.lower())
+    return float(m.group(1)) if m else 99.0
+
 def _resolve_model():
-    """Set MODEL to the best usable model on the active OLLAMA_URL.
-    Prefers the configured MODEL name; falls back to whatever is installed."""
+    """Keep the configured MODEL if the active ollama has it. Only substitute
+    when it's genuinely absent, and then prefer the smallest sensible model
+    (never silently upgrade to a big coder model)."""
     global MODEL
     try:
         with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=2) as r:
             tags = json.loads(r.read())
             names = [m["name"] for m in tags.get("models", []) if m.get("name")]
-        if not names:
-            return
-        # exact or prefix match
-        for n in names:
-            if n == MODEL or n.startswith(MODEL.split(":")[0]):
-                MODEL = n
-                return
-        # nothing matched — use whatever is installed
-        MODEL = names[0]
-        print(f"[ginie] '{MODEL}' not found, using {MODEL}")
     except Exception:
-        pass
+        return
+    if not names:
+        return
+    want = MODEL
+    # 1. exact match — lock it in (this is the happy path for qwen3:0.6b)
+    if want in names:
+        MODEL = want
+        return
+    # 2. same family, e.g. another qwen3 tag
+    fam = want.split(":")[0]
+    fam_hits = [n for n in names if n.split(":")[0] == fam]
+    if fam_hits:
+        MODEL = fam_hits[0]
+        return
+    # 3. genuinely absent — prefer a 0.6b, then any qwen3, else the smallest
+    pref = ([n for n in names if "0.6b" in n]
+            or [n for n in names if n.startswith("qwen3")]
+            or sorted(names, key=_model_size_hint))
+    MODEL = pref[0]
+    print(f"[ginie] '{want}' not installed; falling back to {MODEL}")
 
 def _kill_ginie_ollama():
     """Kill our ollama instance via PID file, then also by binary path."""
@@ -215,6 +258,12 @@ def _kill_ginie_ollama():
 def _start_portable():
     usb_models = os.path.normpath(os.path.join(HERE, "ollama_portable", "models"))
     if not os.path.isdir(usb_models):
+        return False
+
+    # only use the portable instance if it actually carries the model we want;
+    # otherwise fall through to system ollama, which may already have it.
+    if not _usb_has_model(usb_models, MODEL):
+        print(f"[ginie] portable store lacks {MODEL}; using system ollama instead")
         return False
 
     import shutil, stat
@@ -304,9 +353,13 @@ def ensure_ollama():
         usb_models = os.path.normpath(os.path.join(HERE, "ollama_portable", "models"))
         env = os.environ.copy()
         env["OLLAMA_HOST"] = "127.0.0.1:11434"
-        if os.path.isdir(usb_models):
+        # only point the system daemon at the USB store if it has the wanted
+        # model — otherwise let it use its own store (which may have qwen3:0.6b).
+        if os.path.isdir(usb_models) and _usb_has_model(usb_models, MODEL):
             env["OLLAMA_MODELS"] = usb_models
             _set_startup_status("starting system ollama with USB models...")
+        else:
+            _set_startup_status("starting system ollama...")
         proc = subprocess.Popen([sys_bin, "serve"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -776,15 +829,19 @@ class ChatWindow(Gtk.Window):
 # State machine
 # ---------------------------------------------------------------------------
 
-FLOATING = "floating"    # hovering drift — default mode
-HOVERING = "hovering"    # bob in place, no translation
-WALKING  = "walking"     # legs out, walking along screen bottom area
-CROSSING = "crossing"    # target-directed walk across monitors
-POOFING  = "poofing"     # teleport sequence
-GHOSTING = "ghosting"    # invisible walk — only footsteps visible, poof re-appear
-SPAWNING = "spawning"    # materialise from Z_MIN on first launch
-DRAGGED  = "dragged"     # user is dragging
-THROWN   = "thrown"      # released from drag with velocity — momentum + bounce
+FLOATING  = "floating"   # hovering drift — default mode
+HOVERING  = "hovering"   # bob in place, no translation
+WALKING   = "walking"    # legs out, walking along screen bottom area
+CROSSING  = "crossing"   # target-directed walk across monitors
+EXPLORING = "exploring"  # goal-directed roam toward a waypoint
+DIVING    = "diving"     # shrink, dive into a folder, pop out of another
+REACTING  = "reacting"   # plays a one-off reaction set in place (look/excited/etc.)
+SLEEPING  = "sleeping"   # napping — wakes on any interaction
+POOFING   = "poofing"    # teleport sequence
+GHOSTING  = "ghosting"   # invisible walk — only footsteps visible, poof re-appear
+SPAWNING  = "spawning"   # materialise from Z_MIN on first launch
+DRAGGED   = "dragged"    # user is dragging
+THROWN    = "thrown"     # released from drag with velocity — momentum + bounce
 
 # Moods — govern movement personality; rotate every 40-120 s
 MOOD_CURIOUS = "curious"   # balanced explorer, occasional screen crossings
@@ -801,9 +858,13 @@ import math as _math
 FLOAT_SPEED         = 65.0   # px/sec while drifting
 WALK_SPEED          = 75.0   # px/sec while walking
 CROSS_SPEED         = 90.0   # px/sec for purposeful cross-screen walks
+EXPLORE_SPEED       = 95.0   # px/sec roaming toward a waypoint
+DIVE_SPEED          = 130.0  # px/sec diving toward a folder
+ARRIVE_RADIUS       = 55     # px — "reached the waypoint" threshold
 FLOAT_SECS          = (7, 15)
 WALK_SECS           = (6, 12)
 INACTIVITY_WANDER_S = 20
+SLEEP_AFTER_S       = 60     # seconds of no user interaction before napping
 
 ANIM_FLOAT_MS = 110   # float cycle
 ANIM_WALK_MS  =  85   # walk cycle
@@ -837,6 +898,134 @@ _FLOAT_DIRS = [
 _WALK_DIRS  = [( 1.0, 0.0), (-1.0, 0.0),
                ( 1.0, 0.0), (-1.0, 0.0),   # mostly horizontal walk
                ( 0.92, 0.20), (-0.92, 0.20)]
+
+# ---------------------------------------------------------------------------
+# Sass — Ginie's voice. Event-driven quip pools; {f} = a folder name.
+# Nothing here is machine-specific: folder names are filled in at runtime
+# from whatever lives on THIS user's desktop.
+# ---------------------------------------------------------------------------
+
+class Sass:
+    POOLS = {
+        "wake_drag":   ["hey! hands off, i was napping.", "AH, i'm up, i'm up!",
+                        "rude awakening much?", "five more minutes... ugh, fine.",
+                        "i felt that. dragging a sleeping genie. bold."],
+        "wake_idle":   ["...huh? oh, hi.", "i wasn't sleeping. i was thinking.",
+                        "you rang?", "back online. what'd i miss?"],
+        "drag":        ["wheee, where are we going?", "easy, i'm delicate.",
+                        "ooh, a road trip!", "i trust you. mostly."],
+        "drag_again":  ["again? you really like me.", "put me DOWN, gently.",
+                        "i'm getting dizzy up here.", "we've been here before, you and i."],
+        "drag_lots":   ["okay this is just bullying now.", "i live in your cursor now, apparently.",
+                        "do you do this to ALL your apps?", "fine. drag away. i have no dignity left."],
+        "throw":       ["YEEET", "i regret nothing!", "incoming!", "wheeeeee", "physics!!"],
+        "click":       ["yes? you rang?", "sup.", "i was being majestic, but go on.",
+                        "talk to me, human.", "you have my attention. briefly."],
+        "land":        ["nice spot.", "claiming this corner.", "the view's good here.",
+                        "i shall supervise from here."],
+        "explore":     ["off i go.", "what's over there...", "adventure time.",
+                        "let's see what's around here.", "exploring. don't wait up."],
+        "idle_musing": ["i wonder what's in all these folders.", "do you ever just... float?",
+                        "i'm basically sentient now, you know.", "it's quiet. i like it.",
+                        "i could go for a dive.", "you should take a break too.",
+                        "i've been thinking. dangerous, i know."],
+        "dive_in":     ["brb, raiding {f}.", "into the {f} vault...",
+                        "watch this. *dives into {f}*", "{f}, here i come!",
+                        "tucking into {f}, hold my pompom."],
+        "dive_out":    ["...tada! out the {f} side.", "{f}? never heard of her.",
+                        "and THAT'S how you commute.", "popped out of {f}, no big deal.",
+                        "{f} was a shortcut. you're welcome."],
+        "greet_morning":["morning. coffee first, genius later.", "rise and grind, i suppose.",
+                         "good morning. i kept the desktop warm."],
+        "greet_evening":["working late again? same.", "evening. the screen glows nicer now.",
+                         "still here? me too. always."],
+        "greet":       ["merhaba! poke me anytime.", "ginie's here. offline and unbothered.",
+                        "hey. i'm your tiny blue conscience now."],
+    }
+
+    @staticmethod
+    def line(event, **kw):
+        pool = Sass.POOLS.get(event)
+        if not pool:
+            return None
+        try:
+            return random.choice(pool).format(**kw)
+        except (KeyError, IndexError):
+            return random.choice(pool)
+
+# ---------------------------------------------------------------------------
+# FolderRegistry — agnostic desktop-folder map. Scans ~/Desktop on THIS
+# machine, lays out approximate icon positions (GNOME top-right grid by
+# default), and serves non-repeating folder pairs for the dive gag.
+# Override layout in ~/.config/ginie/config.json. Zero folders = no dives.
+# ---------------------------------------------------------------------------
+
+class FolderRegistry:
+    def __init__(self, sw, sh, monitors):
+        self.entries = []          # list of (name, cx, cy) screen-center points
+        self._recent = []          # names used recently — avoid immediate repeats
+        self._load(sw, sh, monitors)
+
+    def _config(self):
+        default = {"icon_corner": "top-right", "icon_cell": 110,
+                   "icon_top": 40, "icon_right": 70, "icon_bottom": 90,
+                   "icon_left": 70}
+        path = os.path.expanduser("~/.config/ginie/config.json")
+        try:
+            with open(path) as f:
+                default.update(json.load(f))
+        except Exception:
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    json.dump(default, f, indent=2)
+            except Exception:
+                pass
+        return default
+
+    def _load(self, sw, sh, monitors):
+        cfg = self._config()
+        desktop = os.path.expanduser("~/Desktop")
+        try:
+            names = sorted(d for d in os.listdir(desktop)
+                           if os.path.isdir(os.path.join(desktop, d))
+                           and not d.startswith('.') and d != '__pycache__')
+        except OSError:
+            names = []
+        if not names:
+            return
+        # icons usually sit on the primary (rightmost) monitor in a grid
+        mx, my, mw, mh = monitors[-1] if monitors else (0, 0, sw, sh)
+        cell  = max(60, cfg["icon_cell"])
+        top   = cfg["icon_top"]
+        rows  = max(1, (mh - top - cfg["icon_bottom"]) // cell)
+        right = cfg["icon_corner"].endswith("right")
+        for i, name in enumerate(names):
+            col = i // rows
+            row = i % rows
+            if right:
+                cxp = mx + mw - cfg["icon_right"] - col * cell - cell // 2
+            else:
+                cxp = mx + cfg["icon_left"] + col * cell + cell // 2
+            cyp = my + top + row * cell + cell // 2
+            # keep targets on-screen even if there are many folders
+            cxp = max(mx + 30, min(cxp, mx + mw - 30))
+            cyp = max(my + 30, min(cyp, my + mh - 30))
+            self.entries.append((name, float(cxp), float(cyp)))
+
+    def pick_pair(self):
+        """Two DISTINCT folders that avoid the most-recently-used ones."""
+        if len(self.entries) < 2:
+            return None
+        avoid = set(self._recent[-min(len(self.entries) - 2, 4):])
+        pool  = [e for e in self.entries if e[0] not in avoid] or list(self.entries)
+        a = random.choice(pool)
+        pool_b = [e for e in self.entries if e[0] != a[0]] or \
+                 [e for e in self.entries if e is not a]
+        b = random.choice(pool_b)
+        self._recent.append(a[0]); self._recent.append(b[0])
+        self._recent = self._recent[-8:]
+        return a, b
 
 # ---------------------------------------------------------------------------
 # Trail overlay — single full-screen window, draws all marks via cairo.
@@ -1020,10 +1209,31 @@ class PetWindow(Gtk.Window):
         self.fs_grab          = load_set("grab",          flip=False)
         self.fs_back_float_r  = load_set("back_float",    flip=False)
         self.fs_back_float_l  = load_set("back_float",    flip=True)
+        # production reaction sets
+        self.fs_dive_r        = load_set("dive",          flip=False)
+        self.fs_dive_l        = load_set("dive",          flip=True)
+        self.fs_excited_r     = load_set("excited",       flip=False)
+        self.fs_excited_l     = load_set("excited",       flip=True)
+        self.fs_look_around   = load_set("look_around",   flip=False)
+        self.fs_annoyed       = load_set("annoyed",       flip=False)
+        self.fs_wave          = load_set("wave",          flip=False)
         # fall back to regular float if back frames missing
         if not self.fs_back_float_r:
             self.fs_back_float_r = self.fs_float_r
             self.fs_back_float_l = self.fs_float_l
+        # graceful fallbacks so a partial sprite dir still runs
+        if not self.fs_dive_r:
+            self.fs_dive_r = self.fs_whee_r or self.fs_float_r
+            self.fs_dive_l = self.fs_whee_l or self.fs_float_l
+        if not self.fs_excited_r:
+            self.fs_excited_r = self.fs_float_happy_r or self.fs_float_r
+            self.fs_excited_l = self.fs_float_happy_l or self.fs_float_l
+        if not self.fs_look_around:
+            self.fs_look_around = self.fs_float_r
+        if not self.fs_annoyed:
+            self.fs_annoyed = self.fs_float_r
+        if not self.fs_wave:
+            self.fs_wave = self.fs_walk_r or self.fs_float_r
 
         if not self.fs_float_r:
             raise RuntimeError(f"no float frames found in {FRAMES_DIR}")
@@ -1033,9 +1243,7 @@ class PetWindow(Gtk.Window):
         self.current   = self.fs_float_r[0]
 
         # screen bounds — use full virtual desktop so Ginie roams across all monitors
-        screen = Gdk.Screen.get_default()
-        self.sw = screen.get_width()
-        self.sh = screen.get_height()
+        self.sw, self.sh = virtual_desktop_size()
 
         self._margin = 90
         # spawn in the center 60% of screen so he's always visible
@@ -1096,6 +1304,9 @@ class PetWindow(Gtk.Window):
         self._monitors = []
         self._detect_monitors()
 
+        # agnostic desktop-folder map for the dive gag
+        self._folders = FolderRegistry(self.sw, self.sh, self._monitors)
+
         # mood system
         self._mood     = MOOD_CURIOUS
         self._mood_end = time.monotonic() + random.uniform(MOOD_MIN_S, MOOD_MAX_S)
@@ -1103,6 +1314,26 @@ class PetWindow(Gtk.Window):
         # crossing target
         self._cross_target_x = 0.0
         self._cross_target_y = 0.0
+
+        # exploration: coverage grid over the full virtual desktop
+        self._explore_cols  = 6
+        self._explore_rows  = 3
+        self._coverage      = [0] * (self._explore_cols * self._explore_rows)
+        self._waypoint      = (self.x, self.y)
+        self._waypoint_cell = 0
+
+        # dive + reaction state
+        self._dive_phase    = None
+        self._dive_in_name  = ""
+        self._dive_out_name = ""
+        self._dive_enter    = (0.0, 0.0)
+        self._dive_exit     = (0.0, 0.0)
+        self._react_set     = None
+
+        # sass / sentience
+        self._sass_last         = 0.0
+        self._drag_count        = 0
+        self._press_was_sleeping = False
 
         self.connect("configure-event", self._on_configure)
         self.move(int(self.x), int(self.y))
@@ -1184,6 +1415,11 @@ class PetWindow(Gtk.Window):
                 self.queue_draw()
             self._anim_t = now
 
+        # keep the speech bubble glued above his head every frame — no idle races,
+        # so it can never strand itself when he dives or zooms across screens
+        if self._bubble.get_visible():
+            self._bubble.place(self.x, self.y, self._disp_w, self._disp_h)
+
         return True
 
     # ── state machine ─────────────────────────────────────────────────────────
@@ -1199,8 +1435,67 @@ class PetWindow(Gtk.Window):
             self.z   = Z_MIN + (Z_NEUTRAL - Z_MIN) * eased
             if progress >= 1.0:
                 self.z = Z_NEUTRAL
-                self._start_float()
+                self._start_explore()
                 GLib.timeout_add(300, self._greet)
+            return
+
+        if self._state == SLEEPING:
+            self._anim_ms = ANIM_FLOAT_MS
+            if self.frame_set is not self.fs_sleep:
+                self.frame_set = self.fs_sleep
+                self.frame_idx = 0
+            self.z += (Z_NEUTRAL - self.z) * Z_RETURN_SPEED * dt * 3
+            ix, iy = int(self.x), int(self.y)
+            self.move(ix, iy)
+            self._bubble.follow(ix, iy)
+            if random.random() < 0.0006:    # the occasional sleepy mutter
+                self.say("idle_musing")
+            return
+
+        if self._state == REACTING:
+            self._anim_ms = ANIM_FLOAT_MS
+            if self._react_set and self.frame_set is not self._react_set:
+                self.frame_set = self._react_set
+                self.frame_idx = 0
+            self._bob_phase += dt * 1.6
+            self.z += (Z_NEUTRAL - self.z) * Z_RETURN_SPEED * dt * 3
+            ix, iy = int(self.x), int(self.y)
+            self.move(ix, iy)
+            self._bubble.follow(ix, iy)
+            if now >= self._state_end:
+                self._pick_next_move(now)
+            return
+
+        if self._state == EXPLORING:
+            self._anim_ms = ANIM_FLOAT_MS
+            wx, wy = self._waypoint
+            cx = self.x + self._disp_w * 0.5
+            cy = self.y + self._disp_h * 0.5
+            dx, dy = wx - cx, wy - cy
+            dist = _math.hypot(dx, dy)
+            if dist < ARRIVE_RADIUS or now >= self._state_end:
+                self._coverage[self._waypoint_cell] += 1
+                self._on_arrive(now)
+                return
+            self._vx = dx / dist
+            self._vy = dy / dist
+            self._facing_right = self._vx >= 0
+            fs = self._float_set()
+            if self.frame_set is not fs:
+                self.frame_set = fs
+            self._bob_phase += dt * 1.8
+            bob_y = _math.sin(self._bob_phase) * 4
+            nx = self.x + self._vx * EXPLORE_SPEED * dt
+            ny = self.y + self._vy * EXPLORE_SPEED * dt + bob_y * dt * 10
+            self.x, self.y = self._clamp(nx, ny)
+            ix, iy = int(self.x), int(self.y)
+            self.move(ix, iy)
+            self._bubble.follow(ix, iy)
+            self._prev_tx, self._prev_ty = self.x, self.y
+            return
+
+        if self._state == DIVING:
+            self._update_dive(now, dt)
             return
 
         if self._state == HOVERING:
@@ -1403,18 +1698,11 @@ class PetWindow(Gtk.Window):
             if self._throw_speed < 25:
                 self._start_float()
 
-        # inactivity: nudge or sleep when idle
-        user_away = (now - self._last_user_action) > INACTIVITY_WANDER_S
-        still = self._state in (FLOATING, HOVERING) and self._vx == 0 and self._vy == 0
-        if user_away and still:
-            asleep = (now - self._last_user_action) > 60
-            if asleep:
-                fs = self.fs_sleep
-                if self.frame_set is not fs:
-                    self.frame_set = fs
-                    self.frame_idx = 0
-            else:
-                self._pick_next_move(now)
+        # inactivity → after a while of no user contact, settle down and nap
+        idle = now - self._last_user_action
+        if (idle > SLEEP_AFTER_S
+                and self._state in (FLOATING, HOVERING, EXPLORING, WALKING, REACTING)):
+            self._start_sleep()
 
     def _clamp(self, nx, ny):
         m = self._margin
@@ -1423,48 +1711,47 @@ class PetWindow(Gtk.Window):
         return nx, ny
 
     def _pick_next_move(self, now):
-        r = random.random()
-        multi = len(self._monitors) > 1
+        r       = random.random()
+        multi   = len(self._monitors) > 1
+        folders = len(self._folders.entries) >= 2
 
+        # exploration is the connective tissue; everything else punctuates it
         if self._mood == MOOD_CURIOUS:
-            if   r < 0.18: self._start_walk()
-            elif r < 0.36: self._start_float()
-            elif r < 0.50: self._start_hover()
-            elif r < 0.64: self._start_poof()
-            elif r < 0.78: self._start_ghost()
-            elif multi:    self._start_cross_screen()
-            else:          self._start_float()
+            if   r < 0.45:            self._start_explore()
+            elif r < 0.60 and folders:self._start_dive()
+            elif r < 0.72:            self._start_walk()
+            elif r < 0.84:            self._start_look_around()
+            elif r < 0.93 and multi:  self._start_cross_screen()
+            else:                     self._start_poof()
 
         elif self._mood == MOOD_HYPER:
-            if   r < 0.28: self._start_walk()
-            elif r < 0.52 and multi: self._start_cross_screen()
-            elif r < 0.68: self._start_poof()
-            elif r < 0.84: self._start_float()
-            else:          self._start_ghost()
+            if   r < 0.35:            self._start_explore()
+            elif r < 0.55 and multi:  self._start_cross_screen()
+            elif r < 0.70 and folders:self._start_dive()
+            elif r < 0.86:            self._start_walk()
+            else:                     self._start_poof()
 
         elif self._mood == MOOD_SHY:
-            if   r < 0.44: self._start_hover()
-            elif r < 0.70: self._start_float(stay_on_monitor=True)
-            elif r < 0.86: self._start_walk()
-            else:          self._start_poof()
+            if   r < 0.40:            self._start_hover()
+            elif r < 0.62:            self._start_float(stay_on_monitor=True)
+            elif r < 0.82:            self._start_explore()
+            else:                     self._start_look_around()
 
         elif self._mood == MOOD_PATROL:
-            if   r < 0.62 and multi: self._start_cross_screen()
-            elif r < 0.82: self._start_walk()
-            else:          self._start_hover()
+            if   r < 0.45 and multi:  self._start_cross_screen()
+            elif r < 0.78:            self._start_explore()
+            elif r < 0.90:            self._start_walk()
+            else:                     self._start_hover()
 
         elif self._mood == MOOD_DREAMY:
-            if   r < 0.50: self._start_float(z_bias=True)
-            elif r < 0.70: self._start_hover()
-            elif r < 0.86: self._start_ghost()
-            else:          self._start_poof()
+            if   r < 0.38:            self._start_float(z_bias=True)
+            elif r < 0.58:            self._start_explore()
+            elif r < 0.72 and folders:self._start_dive()
+            elif r < 0.86:            self._start_look_around()
+            else:                     self._start_ghost()
 
         else:
-            if   r < 0.30: self._start_walk()
-            elif r < 0.52: self._start_float()
-            elif r < 0.67: self._start_hover()
-            elif r < 0.83: self._start_poof()
-            else:          self._start_ghost()
+            self._start_explore()
 
     # ── monitor + mood ────────────────────────────────────────────────────────
 
@@ -1507,6 +1794,176 @@ class PetWindow(Gtk.Window):
         """Sync trail baseline to current position — prevents large delta spikes."""
         self._prev_tx = self.x
         self._prev_ty = self.y
+
+    def _float_set(self):
+        """Pick the float frame set that matches the current mood + facing."""
+        if self._mood == MOOD_HYPER:
+            return self.fs_float_happy_r if self._facing_right else self.fs_float_happy_l
+        if self._mood == MOOD_DREAMY:
+            return self.fs_float_dreamy_r if self._facing_right else self.fs_float_dreamy_l
+        return self.fs_float_r if self._facing_right else self.fs_float_l
+
+    def say(self, event, force=False, ms=3800, **kw):
+        """Speak a sassy line for an event, respecting a cooldown unless forced."""
+        now = time.monotonic()
+        if not force and now - self._sass_last < 5.0:
+            return
+        txt = Sass.line(event, **kw)
+        if txt:
+            self._sass_last = now
+            self.show_bubble(txt, ms)
+
+    # ── exploration ─────────────────────────────────────────────────────────────
+
+    def _start_explore(self):
+        """Head to an under-visited region of the whole virtual desktop."""
+        cols, rows = self._explore_cols, self._explore_rows
+        floor = min(self._coverage)
+        candidates = [i for i, c in enumerate(self._coverage) if c <= floor + 1]
+        cur = self._waypoint_cell
+        candidates = [i for i in candidates if i != cur] or candidates
+        cell = random.choice(candidates)
+        cc, cr = cell % cols, cell // cols
+        cw = self.sw / cols
+        ch = self.sh / rows
+        wx = cc * cw + random.uniform(cw * 0.2, cw * 0.8)
+        wy = cr * ch + random.uniform(ch * 0.25, ch * 0.75)
+        m  = self._margin
+        self._waypoint = (max(m, min(wx, self.sw - m)),
+                          max(m, min(wy, self.sh - m)))
+        self._waypoint_cell = cell
+        self._vx = self._vy = self._vz = 0.0
+        self._state     = EXPLORING
+        self._state_end = time.monotonic() + 30.0   # safety cap
+        self.frame_idx  = 0
+        self._reset_trail_pos()
+        if random.random() < 0.3:
+            self.say("explore")
+
+    def _on_arrive(self, now):
+        """Reached a waypoint — usually just calmly carry on; sometimes glance
+        around or dive. Keeps the chill 'bruh' face dominant."""
+        if random.random() < 0.2:
+            self.say("land")
+        roll = random.random()
+        has_folders = len(self._folders.entries) >= 2
+        if roll < 0.18:
+            self._start_look_around()
+        elif roll < 0.30 and has_folders:
+            self._start_dive()
+        else:
+            self._pick_next_move(now)
+
+    def _start_look_around(self):
+        """Pause and scan the surroundings — curious gaze sweep."""
+        self._vx = self._vy = self._vz = 0.0
+        self._react_set = self.fs_look_around
+        self._state     = REACTING
+        self._state_end = time.monotonic() + random.uniform(1.8, 3.2)
+        self.frame_idx  = 0
+        self._reset_trail_pos()
+        if random.random() < 0.3:
+            self.say("idle_musing")
+
+    def _start_excited(self):
+        """Brief thrilled reaction — used after popping out of a folder dive."""
+        self._vx = self._vy = self._vz = 0.0
+        self._react_set = self.fs_excited_r
+        self._state     = REACTING
+        self._state_end = time.monotonic() + random.uniform(1.3, 2.2)
+        self.frame_idx  = 0
+        self._reset_trail_pos()
+
+    def _start_sleep(self):
+        """Settle in place and nap until the user interacts."""
+        self._vx = self._vy = self._vz = 0.0
+        self._state    = SLEEPING
+        self.frame_set = self.fs_sleep
+        self.frame_idx = 0
+        self._reset_trail_pos()
+
+    # ── folder diving (agnostic Mario-pipe gag) ─────────────────────────────────
+
+    def _start_dive(self):
+        """Shrink, dive into one desktop folder, pop out of a different one."""
+        pair = self._folders.pick_pair()
+        if not pair:
+            self._start_explore()
+            return
+        (n1, x1, y1), (n2, x2, y2) = pair
+        self._dive_in_name  = n1
+        self._dive_out_name = n2
+        self._dive_enter    = (x1, y1)
+        self._dive_exit     = (x2, y2)
+        self._dive_phase    = "approach"
+        self._vx = self._vy = self._vz = 0.0
+        self._state    = DIVING
+        self.frame_idx = 0
+        self._reset_trail_pos()
+        self.say("dive_in", force=True, f=n1)
+
+    def _update_dive(self, now, dt):
+        if self._dive_phase == "approach":
+            self._anim_ms = ANIM_FLOAT_MS
+            ex, ey = self._dive_enter
+            cx = self.x + self._disp_w * 0.5
+            cy = self.y + self._disp_h * 0.5
+            dx, dy = ex - cx, ey - cy
+            dist = _math.hypot(dx, dy)
+            self._facing_right = dx >= 0
+            fs = self.fs_dive_r if self._facing_right else self.fs_dive_l
+            if self.frame_set is not fs:
+                self.frame_set = fs
+            # shrink toward folder-icon size as we approach
+            self.z += (0.10 - self.z) * 3.0 * dt
+            if dist < 26:
+                self._dive_phase = "enter"
+                self.frame_set   = self.fs_poof_shrink
+                self.frame_idx   = 0
+                self._anim_ms    = ANIM_POOF_MS
+            else:
+                # zoom when far, ease down near the folder
+                v = max(DIVE_SPEED, min(900.0, dist * 2.5))
+                self._vx, self._vy = dx / dist, dy / dist
+                nx = self.x + self._vx * v * dt
+                ny = self.y + self._vy * v * dt
+                # relaxed bounds so edge/corner folder icons stay reachable
+                em = 18
+                self.x = max(em, min(nx, self.sw - em))
+                self.y = max(em, min(ny, self.sh - em))
+                self.move(int(self.x), int(self.y))
+                self._bubble.follow(int(self.x), int(self.y))
+
+        elif self._dive_phase == "enter":
+            self._anim_ms = ANIM_POOF_MS
+            self.frame_set = self.fs_poof_shrink
+            if self.frame_idx >= len(self.fs_poof_shrink) - 1:
+                # vanish, jump to the exit folder, tiny
+                self.hide()
+                ox, oy = self._dive_exit
+                self.z = 0.10
+                self._disp_w = max(12, int(SPR_W * self.z))
+                self._disp_h = max(16, int(SPR_H * self.z))
+                self.resize(self._disp_w, self._disp_h)
+                self.x = ox - self._disp_w * 0.5
+                self.y = oy - self._disp_h * 0.5
+                self.move(int(self.x), int(self.y))
+                self._bubble.follow(int(self.x), int(self.y))
+                self._dive_phase = "exit"
+                self.frame_set   = self.fs_poof_expand
+                self.frame_idx   = 0
+                self.show_all()
+                self.say("dive_out", force=True, f=self._dive_out_name)
+
+        elif self._dive_phase == "exit":
+            self._anim_ms = ANIM_POOF_MS
+            self.frame_set = self.fs_poof_expand
+            # grow back up to neutral size at the exit folder
+            self.z += (Z_NEUTRAL - self.z) * 4.0 * dt
+            if self.frame_idx >= len(self.fs_poof_expand) - 1 and self.z > Z_NEUTRAL * 0.85:
+                self.z = Z_NEUTRAL
+                self._dive_phase = None
+                self._start_excited()
 
     def _start_float(self, z_bias=False, stay_on_monitor=False):
         cx_n = (self.x - self.sw * 0.5) / (self.sw * 0.5)
@@ -1607,13 +2064,13 @@ class PetWindow(Gtk.Window):
     # ── input ─────────────────────────────────────────────────────────────────
 
     def _on_press(self, widget, ev):
-        self._last_user_action = time.monotonic()
         self._press_x = ev.x_root
         self._press_y = ev.y_root
         self._did_drag = False
-        # wake from sleep
-        if self.frame_set is self.fs_sleep:
-            self._start_float()
+        # any touch wakes him — remember whether he was actually asleep
+        self._press_was_sleeping = (self._state == SLEEPING
+                                    or self.frame_set is self.fs_sleep)
+        self._wake()
 
     def _on_motion(self, widget, ev):
         if not (ev.state & Gdk.ModifierType.BUTTON1_MASK):
@@ -1626,6 +2083,7 @@ class PetWindow(Gtk.Window):
                 self.frame_set = self.fs_grab
                 self.frame_idx = 0
                 self._drag_samples.clear()
+                self._drag_say()
                 # hand drag to WM — works on X11 and Wayland, no move() needed
                 self.get_window().begin_move_drag(
                     1, int(ev.x_root), int(ev.y_root), ev.time
@@ -1659,13 +2117,40 @@ class PetWindow(Gtk.Window):
             self.x, self.y = float(wx), float(wy)
             self._try_throw()
         else:
-            # click: stop and open chat
+            # click: stop and open chat (with a quip)
             self._vx = self._vy = 0.0
             self._state     = FLOATING
             self._state_end = time.monotonic() + 999
-            self.frame_set  = self.fs_float_r if self._facing_right else self.fs_float_l
+            self.frame_set  = self._float_set()
             self.frame_idx  = 0
+            self.say("wake_idle" if self._press_was_sleeping else "click", force=True)
             self._open_chat()
+
+    def _wake(self, reason="poke"):
+        """Any interaction snaps Ginie awake from a nap, with attitude."""
+        self._last_user_action = time.monotonic()
+        if self._state == SLEEPING or self.frame_set is self.fs_sleep:
+            self._vx = self._vy = self._vz = 0.0
+            self._state     = FLOATING
+            self._state_end = time.monotonic() + 4.0
+            self.frame_set  = self._float_set()
+            self.frame_idx  = 0
+            # the drag handler will deliver its own line; only speak here for a poke
+            if reason != "drag":
+                self.say("wake_drag" if self._drag_count > 0 else "wake_idle",
+                         force=True)
+
+    def _drag_say(self):
+        """Escalating sass the more often the user grabs him."""
+        self._drag_count += 1
+        if self._press_was_sleeping:
+            self.say("wake_drag", force=True)
+        elif self._drag_count <= 2:
+            self.say("drag", force=True)
+        elif self._drag_count <= 5:
+            self.say("drag_again", force=True)
+        else:
+            self.say("drag_lots", force=True)
 
     def _try_throw(self):
         """Compute drag velocity from samples; if fast enough enter THROWN, else float."""
@@ -1686,23 +2171,29 @@ class PetWindow(Gtk.Window):
                 self._throw_speed = min(speed * 0.5, 500)
                 self._facing_right = self._throw_vx >= 0
                 self._state       = THROWN
-                self.frame_set    = (self.fs_float_r if self._facing_right
-                                     else self.fs_float_l)
+                self.frame_set    = (self.fs_whee_r if self._facing_right
+                                     else self.fs_whee_l)
                 self.frame_idx    = 0
                 self._drag_samples.clear()
+                self.say("throw", force=True)
                 return
         self._drag_samples.clear()
         self._start_float()
 
     def _show_menu(self, ev):
+        self._wake()
         menu = Gtk.Menu()
-        for label, fn in [
+        items = [
             ("Mit Ginie reden",  lambda *_: self._open_chat()),
+            ("Erkunden",         lambda *_: self._start_explore()),
             ("Teleportieren",    lambda *_: (setattr(self, '_vz', 0.0), self._start_poof())),
             ("Laufen lassen",    lambda *_: self._start_walk()),
             ("Schweben lassen",  lambda *_: self._start_float()),
             ("Ruhe geben",       lambda *_: self._park()),
-        ]:
+        ]
+        if len(self._folders.entries) >= 2:
+            items.insert(2, ("In Ordner tauchen", lambda *_: self._start_dive()))
+        for label, fn in items:
             it = Gtk.MenuItem(label=label)
             it.connect("activate", fn)
             menu.append(it)
@@ -1733,11 +2224,11 @@ class PetWindow(Gtk.Window):
         self._bubble.show_text(text, ms)
 
     def _greet(self):
-        self.show_bubble(random.choice([
-            "Merhaba! Klick mich an.",
-            "Ginie ist da. Offline und bereit.",
-            "Hey! Was kann ich fuer dich tun?",
-        ]))
+        h = time.localtime().tm_hour
+        if   5 <= h < 11:  event = "greet_morning"
+        elif 18 <= h <= 23: event = "greet_evening"
+        else:              event = "greet"
+        self.say(event, force=True, ms=5000)
         return False
 
 # ---------------------------------------------------------------------------
@@ -1822,47 +2313,36 @@ class BubbleWindow(Gtk.Window):
     def show_text(self, text, ms=7000):
         self.lbl.set_text(text)
         self.show_all()
-        GLib.idle_add(self._do_reposition, int(self.pet.x), int(self.pet.y))
+        # place once now (allocation may be 0 on first show — _tick keeps it glued)
+        GLib.idle_add(lambda: (self.place(self.pet.x, self.pet.y,
+                                          self.pet._disp_w, self.pet._disp_h), False)[1])
         if self._hide_id:
             GLib.source_remove(self._hide_id)
         self._hide_id = GLib.timeout_add(ms, self._auto_hide)
 
     def follow(self, px, py):
-        if not self.get_visible():
-            return
-        GLib.idle_add(self._do_reposition, px, py)
+        """Back-compat shim — real tracking happens synchronously in _tick.place()."""
+        if self.get_visible():
+            self.place(self.pet.x, self.pet.y, self.pet._disp_w, self.pet._disp_h)
 
-    def _do_reposition(self, px, py):
+    def place(self, px, py, disp_w, disp_h):
+        """Synchronously glue the bubble above the genie's head, on-screen."""
         h = self.get_allocated_height()
-        w = self.get_allocated_width()
+        w = max(self.get_allocated_width(), 180)
         if h < 20:
-            GLib.idle_add(self._do_reposition,
-                          int(self.pet.x), int(self.pet.y))
-            return False
-        w = max(w, 180)
-
-        # always use freshest position — passed-in px/py may be stale
-        px = int(self.pet.x)
-        py = int(self.pet.y)
-
-        sw = Gdk.Screen.get_default().get_width()
-
-        # use actual rendered size so centering tracks correctly at any z
-        disp_w = getattr(self.pet, '_disp_w', SPR_W)
-        disp_h = getattr(self.pet, '_disp_h', SPR_H)
+            h = 64   # not allocated yet — estimate; corrected next frame
+        px, py = int(px), int(py)
+        sw = getattr(self.pet, 'sw', None) or virtual_desktop_size()[0]
 
         genie_cx = px + disp_w // 2
         bx = genie_cx - w // 2
-        # hat tip is ~8% inside the window top; aim bubble tail at hat, not air
+        # tail points ~8% down from the window top = the hat/head, never the belly
         by = py - h + int(disp_h * 0.08)
 
         bx = max(6, min(bx, sw - w - 6))
-
-        if by < 6:
+        if by < 6:                       # too near the top edge — flip below him
             by = py + disp_h + 6
-
         self.move(bx, by)
-        return False
 
     def _auto_hide(self):
         self.hide()

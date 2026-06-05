@@ -194,6 +194,12 @@ def draw_face(draw, cx, cy, expression="bruh"):
         _face_happy(draw, cx, cy)
     elif expression == "scared":
         _face_scared(draw, cx, cy)
+    elif expression == "annoyed":
+        _face_annoyed(draw, cx, cy)
+    elif expression == "excited":
+        _face_excited(draw, cx, cy)
+    elif expression == "curious":
+        _face_curious(draw, cx, cy)
 
 def _brows_normal(draw, cx, cy):
     # two clearly separate arched brows — 15px gap at the inner pixel edges
@@ -349,6 +355,61 @@ def _face_scared(draw, cx, cy):
     ell(draw, cx + 1, sy + 2, 4, 3, (20, 12, 40, 255))
     _goatee(draw, cx, sy + 8)
 
+def _face_annoyed(draw, cx, cy):
+    """Sassy eye-roll — half-lidded, one brow cocked, unimpressed smirk."""
+    # asymmetric brows = 'really?': left flat, right cocked up
+    draw.line([(cx - 17, cy - 11), (cx - 8, cy - 12)], fill=BROW, width=2)
+    draw.line([(cx + 8,  cy - 15), (cx + 17, cy - 12)], fill=BROW, width=2)
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy, 6, 6, EYE_WHITE)
+        # pupils rolled UP and to the side
+        ell(draw, ex + 1, cy - 3, 4, 4, EYE_IRIS)
+        ell(draw, ex + 2, cy - 4, 2, 2, EYE_PUPIL)
+        # heavy lid bar over the top half
+        draw.rectangle([ex - 7, cy - 8, ex + 7, cy - 2], fill=BODY_MID)
+    _nose(draw, cx, cy)
+    sy = cy + 12
+    # flat smirk, one corner tugged up
+    draw.line([(cx - 8, sy + 1), (cx + 6, sy)], fill=LIP, width=2)
+    draw.line([(cx + 6, sy), (cx + 10, sy - 3)], fill=LIP, width=2)
+    _goatee(draw, cx, sy + 5)
+
+def _face_excited(draw, cx, cy):
+    """Starry-eyed thrilled — big grin, sparkle eyes, raised brows."""
+    _brows_raised(draw, cx, cy, extra=3)
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy - 1, 7, 7, EYE_WHITE)
+        ell(draw, ex, cy - 1, 5, 5, EYE_IRIS)
+        ell(draw, ex + 1, cy, 2, 2, EYE_PUPIL)
+        # twin sparkles
+        ell(draw, ex - 2, cy - 4, 2, 2, (255, 255, 255, 235))
+        ell(draw, ex + 3, cy + 1, 1, 1, (255, 255, 255, 200))
+    _nose(draw, cx, cy)
+    sy = cy + 11
+    for dx in range(-11, 12):
+        curve = int(dx * dx * 0.045)
+        draw.point((cx + dx, sy + 6 + curve), fill=LIP)
+    draw.line([(cx - 11, sy), (cx + 11, sy)], fill=LIP, width=2)
+    ell(draw, cx, sy + 3, 10, 5, TEETH)
+    _goatee(draw, cx, sy + 9)
+
+def _face_curious(draw, cx, cy, look=0.0):
+    """Calm glance — relaxed lids, eyes just track left/right by `look` in [-1,1].
+    Reads as 'casually looking around', not surprised."""
+    _brows_normal(draw, cx, cy)
+    ox = int(look * 3)
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy, 6, 5, EYE_WHITE)
+        ell(draw, ex + ox, cy, 4, 4, EYE_IRIS)
+        ell(draw, ex + ox + 1, cy, 2, 2, EYE_PUPIL)
+        # soft lid over the top quarter keeps him chill, not wide-eyed
+        draw.rectangle([ex - 7, cy - 7, ex + 7, cy - 3], fill=BODY_MID)
+    _nose(draw, cx, cy)
+    sy = cy + 12
+    # relaxed flat mouth that drifts with the gaze
+    draw.line([(cx - 7 + ox, sy), (cx + 7 + ox, sy)], fill=LIP, width=2)
+    _goatee(draw, cx, sy + 4)
+
 # ── sash ──────────────────────────────────────────────────────────────────────
 
 def draw_sash(draw, cx, waist_y):
@@ -452,6 +513,37 @@ def draw_arms_grab(draw, cx, chest_y):
         ell(draw, ex, ey + 1, 7, 5, GOLD)            # cuff at wrist, not shoulder
         ell(draw, ex, ey + 1, 5, 3, GOLD_LIGHT)
 
+def draw_arms_tuck(draw, cx, chest_y, t):
+    """Tucked cannonball — arms wrap inward for a folder dive."""
+    ay = chest_y + 3
+    for sign in [-1, 1]:
+        sx = cx + sign * 20
+        ex = cx + sign * 5
+        ey = ay + 9
+        thick_line(draw, sx, ay, ex, ey, BODY_MID, w=9)
+        ell(draw, ex, ey + 1, 7, 6, BODY_LIGHT)      # hands meet at center
+        ell(draw, ex, ey + 3, 7, 5, GOLD)            # cuffs
+        ell(draw, ex, ey + 3, 5, 3, GOLD_LIGHT)
+
+def draw_arms_wave(draw, cx, chest_y, t):
+    """One arm waving hello, the other relaxed down."""
+    wave = math.sin(t * 2 * math.pi) * 8
+    ay   = chest_y + 2
+    # left arm relaxed down
+    sx = cx - 20
+    thick_line(draw, sx, ay, cx - 16, ay + 18, BODY_MID, w=9)
+    ell(draw, cx - 16, ay + 20, 7, 6, BODY_LIGHT)
+    ell(draw, cx - 16, ay + 22, 7, 5, GOLD)
+    ell(draw, cx - 16, ay + 22, 5, 3, GOLD_LIGHT)
+    # right arm up, waving
+    sx = cx + 18
+    ex = cx + 28 + int(wave * 0.4)
+    ey = ay - 22
+    thick_line(draw, sx, ay, ex, ey, BODY_LIGHT, w=9)
+    ell(draw, ex, ey - 3, 7, 6, BODY_BRIGHT)         # waving hand
+    ell(draw, ex, ey + 1, 7, 5, GOLD)
+    ell(draw, ex, ey + 1, 5, 3, GOLD_LIGHT)
+
 # ── poof ─────────────────────────────────────────────────────────────────────
 
 def draw_poof(draw, cx, cy, t, expanding):
@@ -491,6 +583,8 @@ def make_frame(mode, frame_idx, total_frames):
         draw_poof(draw, cx, H // 2, t, expanding=(mode == "poof_expand"))
         return img
 
+    face_override = None   # optional per-frame face (e.g. gaze tracking)
+
     if mode == "float":
         head_cy    = int(62 + bob)
         arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
@@ -521,6 +615,33 @@ def make_frame(mode, frame_idx, total_frames):
         arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
         tail_a     = 5
         expression = "sleepy"
+    elif mode == "dive":
+        head_cy    = int(60 + bob * 0.5)
+        arm_fn     = lambda d, c, cy: draw_arms_tuck(d, c, cy, t)
+        tail_a     = 20            # whoosh trail
+        expression = "whee"        # eyes shut, grinning cannonball
+    elif mode == "excited":
+        head_cy    = int(60 + bob * 0.7)
+        arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a     = 16
+        expression = "excited"
+    elif mode == "annoyed":
+        head_cy    = int(62 + bob * 0.3)
+        arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a     = 7
+        expression = "annoyed"
+    elif mode == "wave":
+        head_cy    = int(61 + bob * 0.5)
+        arm_fn     = lambda d, c, cy: draw_arms_wave(d, c, cy, t)
+        tail_a     = 12
+        expression = "happy"
+    elif mode == "look_around":
+        head_cy    = int(62 + bob * 0.4)
+        arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a     = 8
+        expression = "curious"
+        _look      = math.sin(t * 2 * math.pi)   # sweep gaze -1..1
+        face_override = lambda d, c, cy: _face_curious(d, c, cy, _look)
     elif mode == "back_float":
         head_cy    = int(62 + bob)
         tail_a     = 9
@@ -559,7 +680,10 @@ def make_frame(mode, frame_idx, total_frames):
     draw_torso(draw, cx, chest_y)
     arm_fn(draw, cx, chest_y)
     draw_head(draw, cx, head_cy)
-    draw_face(draw, cx, head_cy, expression)
+    if face_override:
+        face_override(draw, cx, head_cy)
+    else:
+        draw_face(draw, cx, head_cy, expression)
     draw_hat(draw, cx, head_top, t)
 
     soft = img.filter(ImageFilter.GaussianBlur(radius=0.7))
@@ -568,10 +692,15 @@ def make_frame(mode, frame_idx, total_frames):
 
 # ── generate ──────────────────────────────────────────────────────────────────
 
-SETS = {"float": 6, "float_happy": 6, "float_dreamy": 6,
-        "walk": 6, "whee": 6, "sleep": 4,
-        "back_float": 6, "back_walk": 6,
-        "poof_expand": 4, "poof_shrink": 4}
+# Production sprite sheet — smooth cycles + full emotional range.
+# Bump any number here to add frames to that cycle (this is the "1000 frames" knob;
+# 130 hand-tuned smooth frames beat 1000 redundant ones and keep the stick lean).
+SETS = {"float": 10, "float_happy": 10, "float_dreamy": 10,
+        "walk": 10, "whee": 8, "sleep": 6,
+        "back_float": 10, "back_walk": 8,
+        "poof_expand": 6, "poof_shrink": 6,
+        "dive": 10, "excited": 10, "look_around": 12,
+        "annoyed": 8, "wave": 8}
 
 def _upscale(img):
     """2x LANCZOS — gives cairo more pixels to work with at high z."""
