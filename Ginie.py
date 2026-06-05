@@ -940,15 +940,10 @@ class PetWindow(Gtk.Window):
         self.frame_idx = 0
         self.current   = self.fs_float_r[0]
 
-        # screen bounds
-        display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
-        if monitor:
-            geo = monitor.get_geometry()
-            self.sw, self.sh = geo.width, geo.height
-        else:
-            self.sw = Gdk.Screen.get_default().get_width()
-            self.sh = Gdk.Screen.get_default().get_height()
+        # screen bounds — use full virtual desktop so Ginie roams across all monitors
+        screen = Gdk.Screen.get_default()
+        self.sw = screen.get_width()
+        self.sh = screen.get_height()
 
         self._margin = 90
         self.x = float(self.sw // 2)
@@ -1475,10 +1470,7 @@ class BubbleWindow(Gtk.Window):
         w = max(nat.width,  180)
         h = max(nat.height, 60)
 
-        display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
-        geo     = monitor.get_geometry() if monitor else None
-        sw      = geo.width  if geo else 1920
+        sw = Gdk.Screen.get_default().get_width()
 
         # center bubble horizontally over the genie sprite
         genie_cx = px + SPR_W // 2
