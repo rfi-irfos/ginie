@@ -60,7 +60,7 @@ def thick_line(draw, x0, y0, x1, y1, color, w=5):
         draw.ellipse([px - hw, py - hw, px + hw, py + hw], fill=color)
 
 def draw_hat_back(draw, cx, head_top, t):
-    """Hat seen from behind — cone shape, gold band visible."""
+    """Hat seen from behind — clean cone, no brim band."""
     tilt   = int(math.sin(t * 2 * math.pi) * 2)
     tip_x  = cx + tilt
     tip_y  = head_top - 34
@@ -68,9 +68,6 @@ def draw_hat_back(draw, cx, head_top, t):
     bw     = 17
     poly(draw, [(tip_x - 2, tip_y), (cx - bw, base_y), (cx + bw, base_y)], HAT_SHADOW)
     poly(draw, [(tip_x,     tip_y + 2), (cx - 6, base_y), (cx + 6, base_y)], HAT_MID)
-    # soft back brim — no hard band
-    draw.arc([cx - bw - 1, base_y - 3, cx + bw + 1, base_y + 8],
-             start=0, end=180, fill=HAT_SHADOW, width=3)
     ell(draw, tip_x, tip_y, 3, 3, GOLD)
 
 def draw_head_back(draw, cx, cy):
@@ -199,15 +196,16 @@ def draw_face(draw, cx, cy, expression="bruh"):
         _face_scared(draw, cx, cy)
 
 def _brows_normal(draw, cx, cy):
-    for bx0 in [cx - 15, cx + 5]:
-        for j in range(8):
-            arch = int((j - 3.5) ** 2 * 0.18)
-            ell(draw, bx0 + j, cy - 10 - arch, 2, 2, BROW)
+    # two clearly separate arched brows — 15px gap at the inner pixel edges
+    for bx0 in [cx - 17, cx + 8]:
+        for j in range(7):
+            arch = int((j - 3) ** 2 * 0.20)
+            ell(draw, bx0 + j, cy - 11 - arch, 2, 2, BROW)
 
 def _brows_raised(draw, cx, cy, extra=6):
-    for bx0 in [cx - 15, cx + 5]:
-        for j in range(8):
-            arch = int((j - 3.5) ** 2 * 0.22)
+    for bx0 in [cx - 17, cx + 8]:
+        for j in range(7):
+            arch = int((j - 3) ** 2 * 0.22)
             ell(draw, bx0 + j, cy - 14 - arch - extra + j // 3, 2, 2, BROW)
 
 def _nose(draw, cx, cy):
@@ -225,11 +223,9 @@ def _goatee(draw, cx, sy):
 
 def _face_bruh(draw, cx, cy):
     """Bruh — unimpressed, heavy lids, flat mouth."""
-    # inner corners of brows slightly raised = annoyed arch
-    for sign in [-1, 1]:
-        bx = cx + sign * 9
-        draw.line([(bx - 5, cy - 13 + sign * 2), (bx + 5, cy - 14 - sign * 1)],
-                  fill=BROW, width=2)
+    # two distinct brows, 16px inner gap
+    draw.line([(cx - 17, cy - 12), (cx - 8,  cy - 14)], fill=BROW, width=2)
+    draw.line([(cx + 8,  cy - 14), (cx + 17, cy - 12)], fill=BROW, width=2)
     # half-lidded eyes — whites, iris, pupil, then heavy lid over top half
     for ex in [cx - 9, cx + 9]:
         ell(draw, ex, cy,     6, 6, EYE_WHITE)
@@ -500,6 +496,16 @@ def make_frame(mode, frame_idx, total_frames):
         arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
         tail_a     = 9
         expression = "bruh"
+    elif mode == "float_happy":
+        head_cy    = int(61 + bob)
+        arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a     = 11
+        expression = "happy"
+    elif mode == "float_dreamy":
+        head_cy    = int(63 + bob * 0.6)
+        arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a     = 6
+        expression = "sleepy"
     elif mode == "walk":
         head_cy    = int(60 + bob * 0.5)
         arm_fn     = lambda d, c, cy: draw_arms_drifting(d, c, cy, t)
@@ -562,7 +568,8 @@ def make_frame(mode, frame_idx, total_frames):
 
 # ── generate ──────────────────────────────────────────────────────────────────
 
-SETS = {"float": 6, "walk": 6, "whee": 6, "sleep": 4,
+SETS = {"float": 6, "float_happy": 6, "float_dreamy": 6,
+        "walk": 6, "whee": 6, "sleep": 4,
         "back_float": 6, "back_walk": 6,
         "poof_expand": 4, "poof_shrink": 4}
 

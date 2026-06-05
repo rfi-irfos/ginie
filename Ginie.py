@@ -164,6 +164,27 @@ def _model_available():
     except Exception:
         return False
 
+def _resolve_model():
+    """Set MODEL to the best usable model on the active OLLAMA_URL.
+    Prefers the configured MODEL name; falls back to whatever is installed."""
+    global MODEL
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=2) as r:
+            tags = json.loads(r.read())
+            names = [m["name"] for m in tags.get("models", []) if m.get("name")]
+        if not names:
+            return
+        # exact or prefix match
+        for n in names:
+            if n == MODEL or n.startswith(MODEL.split(":")[0]):
+                MODEL = n
+                return
+        # nothing matched — use whatever is installed
+        MODEL = names[0]
+        print(f"[ginie] '{MODEL}' not found, using {MODEL}")
+    except Exception:
+        pass
+
 def _kill_ginie_ollama():
     """Kill our ollama instance via PID file, then also by binary path."""
     try:
@@ -301,7 +322,8 @@ def ensure_ollama():
             except Exception:
                 pass
 
-    _set_startup_status("model ready")
+    _resolve_model()
+    _set_startup_status(f"model ready: {MODEL}")
     _prewarm_model()
 
 _INFERENCE_OPTIONS = {
@@ -380,8 +402,38 @@ def ollama_stream(prompt, history=None, think=False):
                 if chunk.get("done"):
                     break
     except urllib.error.HTTPError as e:
-        yield ("response", "model not found on this machine." if e.code == 404
-                           else f"ollama error {e.code}")
+        if e.code == 404:
+            _resolve_model()
+            # retry once with whatever model is now set
+            payload["model"] = MODEL
+            body2 = json.dumps(payload).encode()
+            req2  = urllib.request.Request(
+                f"{OLLAMA_URL}/api/chat",
+                data=body2, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req2, timeout=120) as r2:
+                    for raw in r2:
+                        line = raw.strip()
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        msg       = chunk.get("message", {})
+                        think_tok = msg.get("thinking", "")
+                        resp_tok  = msg.get("content", "")
+                        if think_tok and think_tok.strip():
+                            yield ("think", think_tok)
+                        if resp_tok and (resp_tok.strip() or resp_tok == "\n"):
+                            yield ("response", resp_tok)
+                        if chunk.get("done"):
+                            break
+            except Exception as e2:
+                yield ("response", f"no model available. run: ollama pull qwen3:0.6b\n({e2})")
+        else:
+            yield ("response", f"ollama error {e.code}")
     except Exception as e:
         yield ("response", f"offline — {_startup_status}\n(log: /tmp/ginie_ol.log)")
 
@@ -746,10 +798,10 @@ MOOD_MAX_S = 120
 
 import math as _math
 
-FLOAT_SPEED         = 55.0   # px/sec while drifting
+FLOAT_SPEED         = 65.0   # px/sec while drifting
 WALK_SPEED          = 75.0   # px/sec while walking
 CROSS_SPEED         = 90.0   # px/sec for purposeful cross-screen walks
-FLOAT_SECS          = (6, 12)
+FLOAT_SECS          = (7, 15)
 WALK_SECS           = (6, 12)
 INACTIVITY_WANDER_S = 20
 
@@ -757,11 +809,12 @@ ANIM_FLOAT_MS = 110   # float cycle
 ANIM_WALK_MS  =  85   # walk cycle
 ANIM_POOF_MS  =  65   # poof frames
 
-Z_MIN          = 0.08   # deepest-into-screen — tiny dot
+Z_MIN          = 0.025  # deepest-into-screen — tiny dot, folder-icon size
 Z_MAX          = 2.5    # closest — right in your face
 Z_SPEED        = 0.50   # z-units/sec at vz=1.0
 Z_NEUTRAL      = 0.50   # resting size (240×320 native → ~120×160 on screen)
-Z_RETURN_SPEED = 0.12   # how fast z drifts back to Z_NEUTRAL when not moving in z
+Z_RETURN_SPEED = 2.5    # fast snap back to neutral after z excursion
+Z_VZ_DAMP      = 1.2    # how fast vz bleeds off so z excursions self-terminate
 SPAWN_SECS     = 1.6    # seconds for materialise-from-depth spawn
 
 # Drift directions — (vx, vy, vz).  vz>0 = toward viewer, vz<0 = into screen.
@@ -951,8 +1004,12 @@ class PetWindow(Gtk.Window):
         self.connect("motion-notify-event",  self._on_motion)
 
         # load all sprite sets
-        self.fs_float_r     = load_set("float",        flip=False)
-        self.fs_float_l     = load_set("float",        flip=True)
+        self.fs_float_r          = load_set("float",         flip=False)
+        self.fs_float_l          = load_set("float",         flip=True)
+        self.fs_float_happy_r    = load_set("float_happy",   flip=False)
+        self.fs_float_happy_l    = load_set("float_happy",   flip=True)
+        self.fs_float_dreamy_r   = load_set("float_dreamy",  flip=False)
+        self.fs_float_dreamy_l   = load_set("float_dreamy",  flip=True)
         self.fs_walk_r      = load_set("walk",         flip=False)
         self.fs_walk_l      = load_set("walk",         flip=True)
         self.fs_whee_r      = load_set("whee",         flip=False)
@@ -1148,7 +1205,14 @@ class PetWindow(Gtk.Window):
 
         if self._state == HOVERING:
             self._anim_ms = ANIM_FLOAT_MS
-            fs = self.fs_float_r if self._facing_right else self.fs_float_l
+            if self._mood == MOOD_HYPER:
+                fs = self.fs_float_happy_r if self._facing_right else self.fs_float_happy_l
+            elif self._mood == MOOD_DREAMY:
+                fs = self.fs_float_dreamy_r if self._facing_right else self.fs_float_dreamy_l
+            elif self._facing_right:
+                fs = self.fs_float_r
+            else:
+                fs = self.fs_float_l
             if self.frame_set is not fs:
                 self.frame_set = fs
             self._bob_phase += dt * 1.8
@@ -1166,28 +1230,32 @@ class PetWindow(Gtk.Window):
         if self._state == FLOATING:
             self._anim_ms = ANIM_FLOAT_MS
 
-            # z-axis: update depth, bounce at limits
-            self.z += self._vz * Z_SPEED * dt
+            # z-axis: bleed vz so excursions self-terminate, then drift back to neutral
+            self._vz *= max(0.0, 1.0 - Z_VZ_DAMP * dt)
+            self.z   += self._vz * Z_SPEED * dt
             if self.z <= Z_MIN:
                 self.z   = Z_MIN
-                self._vz = abs(self._vz) if self._vz else 0.0
+                self._vz = abs(self._vz) * 0.4   # soft bounce inward
             elif self.z >= Z_MAX:
                 self.z   = Z_MAX
-                self._vz = -abs(self._vz) if self._vz else 0.0
+                self._vz = -abs(self._vz) * 0.4
+            # always drift toward neutral (fast when vz is small)
+            drift_strength = Z_RETURN_SPEED * (1.0 - min(1.0, abs(self._vz) * 2))
+            self.z += (Z_NEUTRAL - self.z) * drift_strength * dt
 
             # back-view when moving away from viewer
             if self._vz < -0.05:
                 fs = self.fs_back_float_r if self._facing_right else self.fs_back_float_l
+            elif self._mood == MOOD_HYPER:
+                fs = self.fs_float_happy_r if self._facing_right else self.fs_float_happy_l
+            elif self._mood == MOOD_DREAMY:
+                fs = self.fs_float_dreamy_r if self._facing_right else self.fs_float_dreamy_l
             elif self._facing_right:
                 fs = self.fs_float_r
             else:
                 fs = self.fs_float_l
             if self.frame_set is not fs:
                 self.frame_set = fs
-
-            # when not moving in z, slowly return to natural size
-            if abs(self._vz) < 0.05:
-                self.z += (Z_NEUTRAL - self.z) * Z_RETURN_SPEED * dt
 
             # sinusoidal bob overlaid on directional drift
             self._bob_phase += dt * 1.8
@@ -1601,6 +1669,8 @@ class PetWindow(Gtk.Window):
 
     def _try_throw(self):
         """Compute drag velocity from samples; if fast enough enter THROWN, else float."""
+        self.z   = Z_NEUTRAL   # snap z — dragging doesn't change depth
+        self._vz = 0.0
         self._drag_samples = [s for s in self._drag_samples
                               if time.monotonic() - s[0] < 0.15]
         if len(self._drag_samples) >= 2:
