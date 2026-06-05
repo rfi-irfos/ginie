@@ -68,11 +68,9 @@ def draw_hat_back(draw, cx, head_top, t):
     bw     = 17
     poly(draw, [(tip_x - 2, tip_y), (cx - bw, base_y), (cx + bw, base_y)], HAT_SHADOW)
     poly(draw, [(tip_x,     tip_y + 2), (cx - 6, base_y), (cx + 6, base_y)], HAT_MID)
-    draw.rectangle([cx - bw - 1, base_y - 5, cx + bw + 1, base_y + 5], fill=HAT_BAND)
-    # small bow-knot at the back of the band
-    for ox in [-5, 5]:
-        ell(draw, cx + ox, base_y, 4, 4, GOLD)
-    ell(draw, cx, base_y, 3, 3, GOLD_LIGHT)
+    # soft back brim — no hard band
+    draw.arc([cx - bw - 1, base_y - 3, cx + bw + 1, base_y + 8],
+             start=0, end=180, fill=HAT_SHADOW, width=3)
     ell(draw, tip_x, tip_y, 3, 3, GOLD)
 
 def draw_head_back(draw, cx, cy):
@@ -213,8 +211,9 @@ def _brows_raised(draw, cx, cy, extra=6):
             ell(draw, bx0 + j, cy - 14 - arch - extra + j // 3, 2, 2, BROW)
 
 def _nose(draw, cx, cy):
-    ell(draw, cx + 1, cy + 7, 2, 2, BODY_SHADOW)
-    ell(draw, cx + 5, cy + 7, 2, 2, BODY_SHADOW)
+    # Voldemort slits — centered, very subtle
+    ell(draw, cx - 3, cy + 6, 2, 3, (*BODY_SHADOW[:3], 150))
+    ell(draw, cx + 3, cy + 6, 2, 3, (*BODY_SHADOW[:3], 150))
 
 def _goatee(draw, cx, sy):
     """Pointed goatee — narrows to a tip."""
@@ -545,7 +544,7 @@ def make_frame(mode, frame_idx, total_frames):
         draw_smoke_tail(draw, cx, waist_y, t, amplitude=tail_a)
         draw_sash(draw, cx, waist_y)
         draw_torso_back(draw, cx, chest_y)
-        draw_arms_crossed_back(draw, cx, chest_y, t)
+        # no arms — just the cold back
         draw_head_back(draw, cx, head_cy)
         draw_hat_back(draw, cx, head_top, t)
         soft = img.filter(ImageFilter.GaussianBlur(radius=0.7))
