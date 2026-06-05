@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=USB Assistant
+Comment=Desktop Pet & File Searcher
+Exec=bash -c 'DIR="$(dirname "$(readlink -f "%k")")"; cd "$DIR" && python3 assistent.py'
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=Utility;

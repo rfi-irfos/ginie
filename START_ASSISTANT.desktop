@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=Ginie
+Comment=Portable USB AI Assistant
+Exec=bash -c 'python3 "$(dirname "$(readlink -f "%k")")/Ginie.py"'
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=Utility;
