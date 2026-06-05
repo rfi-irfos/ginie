@@ -1114,6 +1114,7 @@ class PetWindow(Gtk.Window):
                         self._vy = dy / dist
                         self._facing_right = dx >= 0
                         self.frame_idx = 0
+                        self._reset_trail_pos()   # sync trail so first step lands correctly
                     else:
                         # normal poof: jump to target, start shrink
                         self.x, self.y = self._poof_target_x, self._poof_target_y
@@ -1260,8 +1261,9 @@ class PetWindow(Gtk.Window):
         self._last_user_action = time.monotonic()
         self._press_x = ev.x_root
         self._press_y = ev.y_root
-        self._drag_ox = ev.x_root - self.x
-        self._drag_oy = ev.y_root - self.y
+        wx, wy = self.get_position()   # actual window pos, not tracked self.x/y (can drift)
+        self._drag_ox = ev.x_root - wx
+        self._drag_oy = ev.y_root - wy
         self._did_drag = False
         if ev.button == 3:
             self._show_menu(ev)
@@ -1457,7 +1459,7 @@ class BubbleWindow(Gtk.Window):
     def show_text(self, text, ms=7000):
         self.lbl.set_text(text)
         self.show_all()
-        self._do_reposition(int(self.pet.x), int(self.pet.y))
+        GLib.idle_add(self._do_reposition, int(self.pet.x), int(self.pet.y))
         if self._hide_id:
             GLib.source_remove(self._hide_id)
         self._hide_id = GLib.timeout_add(ms, self._auto_hide)
@@ -1482,8 +1484,8 @@ class BubbleWindow(Gtk.Window):
         genie_cx = px + SPR_W // 2
         bx = genie_cx - w // 2
 
-        # sit above genie's head; tail tip touches the sprite top
-        by = py - h - 2
+        # tail tip sits just above the hat (hat tip ~top of sprite window + small gap)
+        by = py - h - 8
 
         # clamp to screen
         bx = max(6, min(bx, sw - w - 6))
