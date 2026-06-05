@@ -1341,8 +1341,6 @@ class PetWindow(Gtk.Window):
         # wake from sleep
         if self.frame_set is self.fs_sleep:
             self._start_float()
-        if ev.button == 3:
-            self._show_menu(ev)
 
     def _on_motion(self, widget, ev):
         if not (ev.state & Gdk.ModifierType.BUTTON1_MASK):
@@ -1376,6 +1374,9 @@ class PetWindow(Gtk.Window):
         return False
 
     def _on_release(self, widget, ev):
+        if ev.button == 3:
+            self._show_menu(ev)
+            return
         if ev.button != 1:
             return
         self._last_user_action = time.monotonic()
@@ -1422,7 +1423,7 @@ class PetWindow(Gtk.Window):
         menu = Gtk.Menu()
         for label, fn in [
             ("Mit Ginie reden",  lambda *_: self._open_chat()),
-            ("Teleportieren",    lambda *_: self._start_poof()),
+            ("Teleportieren",    lambda *_: (setattr(self, '_vz', 0.0), self._start_poof())),
             ("Laufen lassen",    lambda *_: self._start_walk()),
             ("Schweben lassen",  lambda *_: self._start_float()),
             ("Ruhe geben",       lambda *_: self._park()),
@@ -1435,7 +1436,7 @@ class PetWindow(Gtk.Window):
         quit_it.connect("activate", lambda *_: (self._trail.hide_all(), Gtk.main_quit()))
         menu.append(quit_it)
         menu.show_all()
-        menu.popup_at_pointer(ev)
+        menu.popup(None, None, None, None, ev.button, ev.time)
 
     def _park(self):
         """Stop everything — genie floats in place."""
