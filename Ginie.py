@@ -389,7 +389,7 @@ def ollama_stream(prompt, history=None, think=False):
 # Frame loader
 # ---------------------------------------------------------------------------
 
-SPR_W, SPR_H = 90, 120    # display size (matches 120:160 canvas ratio)
+SPR_W, SPR_H = 240, 320   # native sprite resolution (2x render → crisp at zoom)
 
 def _to_pixbuf(img, flip=False, tilt=0):
     img = img.convert("RGBA")
@@ -743,8 +743,8 @@ ANIM_FLOAT_MS = 110   # float cycle
 ANIM_WALK_MS  =  85   # walk cycle
 ANIM_POOF_MS  =  65   # poof frames
 
-Z_MIN   = 0.12   # deepest-into-screen scale — really tiny dot
-Z_MAX   = 2.8    # closest-to-viewer scale — right in your face
+Z_MIN   = 0.08   # deepest-into-screen scale — really tiny dot
+Z_MAX   = 2.5    # closest-to-viewer scale — right in your face (2x source = crisp)
 Z_SPEED = 0.50   # z-units per second when vz=1.0
 
 # Drift directions — (vx, vy, vz).  vz>0 = toward viewer, vz<0 = into screen.
@@ -977,8 +977,8 @@ class PetWindow(Gtk.Window):
         self._vz = 0.0
         self._facing_right = True
 
-        # depth / z-axis
-        self.z        = 1.0     # 1.0 = normal size
+        # depth / z-axis — start at 0.5 so default display ≈ 120×160 px
+        self.z        = 0.5     # 1.0 = native sprite size (240×320)
         self._disp_w  = SPR_W   # current window pixel width
         self._disp_h  = SPR_H   # current window pixel height
 
@@ -1515,7 +1515,7 @@ class BubbleWindow(Gtk.Window):
         close_lbl.set_margin_bottom(4)
         close_lbl.set_halign(Gtk.Align.END)
         close_box.add(close_lbl)
-        close_box.connect("button-press-event", lambda *_: self.hide())
+        close_box.connect("button-press-event", lambda *_: (self.hide(), self.pet._open_chat()))
         box.pack_start(close_box, False, False, 0)
 
     def _on_draw(self, widget, cr):
@@ -1561,23 +1561,24 @@ class BubbleWindow(Gtk.Window):
         h = self.get_allocated_height()
         w = self.get_allocated_width()
         if h < 20:
-            # layout not settled yet — retry next idle
             GLib.idle_add(self._do_reposition, px, py)
             return False
         w = max(w, 180)
 
         sw = Gdk.Screen.get_default().get_width()
 
-        genie_cx = px + SPR_W // 2
-        bx = genie_cx - w // 2
+        # use actual rendered size so centering tracks correctly at any z
+        disp_w = getattr(self.pet, '_disp_w', SPR_W)
+        disp_h = getattr(self.pet, '_disp_h', SPR_H)
 
-        # tail tip sits just above the sprite top (hat tip), with a small gap
+        genie_cx = px + disp_w // 2
+        bx = genie_cx - w // 2
         by = py - h - 6
 
         bx = max(6, min(bx, sw - w - 6))
 
         if by < 6:
-            by = py + SPR_H + 6
+            by = py + disp_h + 6
 
         self.move(bx, by)
         return False

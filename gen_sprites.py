@@ -144,23 +144,32 @@ def draw_smoke_tail(draw, cx, waist_y, t, amplitude=9):
 # ── hat ───────────────────────────────────────────────────────────────────────
 
 def draw_hat(draw, cx, head_top, t):
-    tilt   = int(math.sin(t * 2 * math.pi) * 2)
-    tip_x  = cx + tilt
-    tip_y  = head_top - 34
-    base_y = head_top + 4
+    """Zipfelmütze — soft floppy hat, tip droops and sways."""
+    phase  = t * 2 * math.pi
+    flop_x = int(math.sin(phase) * 6) + 9   # droop right by default, sway ±6
+    flop_y = int(abs(math.sin(phase)) * 3)   # tip dips a little at extremes
+    tip_x  = cx + flop_x
+    tip_y  = head_top - 40 + flop_y
+    base_y = head_top + 3
     bw     = 17
 
-    poly(draw, [(tip_x - 2, tip_y), (cx - bw, base_y), (cx,      base_y)], HAT_SHADOW)
-    poly(draw, [(tip_x + 1, tip_y), (cx,      base_y), (cx + bw, base_y)], HAT_MID)
-    poly(draw, [(tip_x,     tip_y + 3), (cx - 4, base_y), (cx + 4, base_y)], HAT_LIGHT)
+    # shadow face (right side)
+    poly(draw, [(cx + 1, base_y), (cx + bw, base_y), (tip_x + 2, tip_y + 4)], HAT_SHADOW)
+    # main hat body
+    poly(draw, [(cx - bw, base_y), (cx + bw, base_y), (tip_x, tip_y)], HAT_MID)
+    # highlight stripe — left-lit
+    poly(draw, [(cx - bw + 1, base_y), (cx + 2, base_y), (tip_x - 3, tip_y + 12)], HAT_LIGHT)
 
-    draw.rectangle([cx - bw - 1, base_y - 5, cx + bw + 1, base_y + 5], fill=HAT_BAND)
+    # soft rounded brim — no hard band, just fabric draping on head
+    draw.arc([cx - bw - 1, base_y - 3, cx + bw + 1, base_y + 8],
+             start=0, end=180, fill=HAT_SHADOW, width=3)
+    draw.arc([cx - bw + 3, base_y - 1, cx + bw - 3, base_y + 5],
+             start=0, end=180, fill=HAT_MID, width=2)
 
-    ell(draw, tip_x, tip_y, 3, 3, GOLD)
-    for ang in [0, 90, 180, 270]:
-        rad = math.radians(ang)
-        draw.point((tip_x + int(math.cos(rad) * 4),
-                    tip_y + int(math.sin(rad) * 4)), fill=GOLD_LIGHT)
+    # pompom at drooping tip
+    ell(draw, tip_x, tip_y, 5, 5, GOLD)
+    ell(draw, tip_x - 1, tip_y - 1, 3, 3, GOLD_LIGHT)
+    ell(draw, tip_x + 1, tip_y + 1, 2, 2, GOLD)
 
 # ── head + face ───────────────────────────────────────────────────────────────
 
@@ -175,8 +184,10 @@ def draw_head(draw, cx, cy):
     ell(draw, cx + r - 2, cy + 3, 5, 7, BODY_MID)
     ell(draw, cx + r - 1, cy + 3, 3, 5, BODY_LIGHT)
 
-def draw_face(draw, cx, cy, expression="smirk"):
-    if expression == "smirk":
+def draw_face(draw, cx, cy, expression="bruh"):
+    if expression == "bruh":
+        _face_bruh(draw, cx, cy)
+    elif expression == "smirk":
         _face_smirk(draw, cx, cy)
     elif expression == "surprised":
         _face_surprised(draw, cx, cy)
@@ -208,6 +219,28 @@ def _goatee(draw, cx, sy):
         bw = max(0, 3 - abs(dy - 2))
         for dx in range(-bw, bw + 1):
             draw.point((cx + dx, sy + dy), fill=(*BEARD[:3], max(60, BEARD[3] - dy * 25)))
+
+def _face_bruh(draw, cx, cy):
+    """Bruh — unimpressed, heavy lids, flat mouth."""
+    # inner corners of brows slightly raised = annoyed arch
+    for sign in [-1, 1]:
+        bx = cx + sign * 9
+        draw.line([(bx - 5, cy - 13 + sign * 2), (bx + 5, cy - 14 - sign * 1)],
+                  fill=BROW, width=2)
+    # half-lidded eyes — whites, iris, pupil, then heavy lid over top half
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy,     6, 6, EYE_WHITE)
+        ell(draw, ex, cy + 1, 4, 4, EYE_IRIS)
+        ell(draw, ex + 1, cy, 2, 2, EYE_PUPIL)
+        # solid eyelid bar covering the top ~45% of the eye
+        draw.rectangle([ex - 7, cy - 8, ex + 7, cy - 1], fill=BODY_MID)
+    _nose(draw, cx, cy)
+    # dead-flat mouth, tiny downturn at corners
+    sy = cy + 12
+    draw.line([(cx - 8, sy), (cx + 8, sy)], fill=LIP, width=2)
+    draw.line([(cx - 8, sy), (cx - 10, sy + 2)], fill=LIP, width=1)
+    draw.line([(cx + 8, sy), (cx + 10, sy + 2)], fill=LIP, width=1)
+    _goatee(draw, cx, sy + 4)
 
 def _face_smirk(draw, cx, cy):
     """Cool relaxed smirk — default float expression."""
@@ -420,7 +453,7 @@ def make_frame(mode, frame_idx, total_frames):
         head_cy    = int(62 + bob)
         arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
         tail_a     = 9
-        expression = "smirk"
+        expression = "bruh"
     elif mode == "walk":
         head_cy    = int(60 + bob * 0.5)
         arm_fn     = lambda d, c, cy: draw_arms_drifting(d, c, cy, t)
@@ -487,15 +520,20 @@ SETS = {"float": 6, "walk": 6, "whee": 6, "sleep": 4,
         "back_float": 6, "back_walk": 6,
         "poof_expand": 4, "poof_shrink": 4}
 
+def _upscale(img):
+    """2x LANCZOS — gives cairo more pixels to work with at high z."""
+    return img.resize((W * 2, H * 2), Image.Resampling.LANCZOS)
+
 # grab — single tilted frame
 grab = make_frame("grab", 0, 1)
 grab = grab.rotate(-20, expand=False, fillcolor=(0, 0, 0, 0))
+grab = _upscale(grab)
 grab.save(os.path.join(OUTDIR, "grab_00.png"))
 print("  grab_00.png")
 
 for mode, n in SETS.items():
     for i in range(n):
-        frame = make_frame(mode, i, n)
+        frame = _upscale(make_frame(mode, i, n))
         path  = os.path.join(OUTDIR, f"{mode}_{i:02d}.png")
         frame.save(path)
         print(f"  {path}")
