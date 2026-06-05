@@ -743,13 +743,26 @@ ANIM_FLOAT_MS = 110   # float cycle
 ANIM_WALK_MS  =  85   # walk cycle
 ANIM_POOF_MS  =  65   # poof frames
 
-# Drift directions — mostly horizontal, some diagonal, rarely vertical
+Z_MIN   = 0.35   # deepest-into-screen scale
+Z_MAX   = 2.0    # closest-to-viewer scale
+Z_SPEED = 0.32   # z-units per second when vz=1.0
+
+# Drift directions — (vx, vy, vz).  vz>0 = toward viewer, vz<0 = into screen.
 _FLOAT_DIRS = [
-    ( 1.0,  0.0), (-1.0,  0.0),
-    ( 1.0,  0.0), (-1.0,  0.0),   # double-weight horizontal
-    ( 0.92,  0.30), (-0.92,  0.30),
-    ( 0.92, -0.30), (-0.92, -0.30),
-    ( 0.70,  0.70), (-0.70,  0.70),
+    # flat horizontal (most common)
+    ( 1.0,  0.0,  0.0), (-1.0,  0.0,  0.0),
+    ( 1.0,  0.0,  0.0), (-1.0,  0.0,  0.0),
+    ( 0.92,  0.30, 0.0), (-0.92,  0.30, 0.0),
+    ( 0.92, -0.30, 0.0), (-0.92, -0.30, 0.0),
+    ( 0.70,  0.70, 0.0), (-0.70,  0.70, 0.0),
+    # diagonal with depth
+    ( 0.70,  0.0,  1.0), (-0.70,  0.0,  1.0),   # right + toward viewer
+    ( 0.70,  0.0, -1.0), (-0.70,  0.0, -1.0),   # right + away from viewer
+    ( 0.50,  0.30,  0.9), (-0.50,  0.30,  0.9),
+    ( 0.50, -0.30, -0.9), (-0.50, -0.30, -0.9),
+    # mostly-z directions
+    ( 0.20,  0.0,  1.0), (-0.20,  0.0,  1.0),
+    ( 0.20,  0.0, -1.0), (-0.20,  0.0, -1.0),
 ]
 _WALK_DIRS  = [( 1.0, 0.0), (-1.0, 0.0),
                ( 1.0, 0.0), (-1.0, 0.0),   # mostly horizontal walk
@@ -932,9 +945,15 @@ class PetWindow(Gtk.Window):
         self.fs_whee_r      = load_set("whee",         flip=False)
         self.fs_whee_l      = load_set("whee",         flip=True)
         self.fs_sleep       = load_set("sleep",        flip=False)
-        self.fs_poof_expand = load_set("poof_expand",  flip=False)
-        self.fs_poof_shrink = load_set("poof_shrink",  flip=False)
-        self.fs_grab        = load_set("grab",         flip=False)
+        self.fs_poof_expand   = load_set("poof_expand",   flip=False)
+        self.fs_poof_shrink   = load_set("poof_shrink",   flip=False)
+        self.fs_grab          = load_set("grab",          flip=False)
+        self.fs_back_float_r  = load_set("back_float",    flip=False)
+        self.fs_back_float_l  = load_set("back_float",    flip=True)
+        # fall back to regular float if back frames missing
+        if not self.fs_back_float_r:
+            self.fs_back_float_r = self.fs_float_r
+            self.fs_back_float_l = self.fs_float_l
 
         if not self.fs_float_r:
             raise RuntimeError(f"no float frames found in {FRAMES_DIR}")
@@ -955,7 +974,13 @@ class PetWindow(Gtk.Window):
         # velocity
         self._vx = 0.0
         self._vy = 0.0
+        self._vz = 0.0
         self._facing_right = True
+
+        # depth / z-axis
+        self.z        = 1.0     # 1.0 = normal size
+        self._disp_w  = SPR_W   # current window pixel width
+        self._disp_h  = SPR_H   # current window pixel height
 
         # sinusoidal float bobbing
         self._bob_phase = 0.0
@@ -1008,8 +1033,15 @@ class PetWindow(Gtk.Window):
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
         if self.current:
+            w = self.get_allocated_width()
+            h = self.get_allocated_height()
+            sx = w / SPR_W
+            sy = h / SPR_H
+            cr.save()
+            cr.scale(sx, sy)
             Gdk.cairo_set_source_pixbuf(cr, self.current, 0, 0)
             cr.paint()
+            cr.restore()
         return False
 
     # ── 60fps tick ────────────────────────────────────────────────────────────
@@ -1029,6 +1061,20 @@ class PetWindow(Gtk.Window):
                 self._try_throw()
         else:
             self._update_state(now, dt)
+
+        # resize window when z changes (keeps sprite center pinned)
+        new_w = max(12, int(SPR_W * self.z))
+        new_h = max(16, int(SPR_H * self.z))
+        if new_w != self._disp_w or new_h != self._disp_h:
+            cx = self.x + self._disp_w * 0.5
+            cy = self.y + self._disp_h * 0.5
+            self._disp_w = new_w
+            self._disp_h = new_h
+            self.resize(new_w, new_h)
+            self.x = cx - new_w * 0.5
+            self.y = cy - new_h * 0.5
+            self.move(int(self.x), int(self.y))
+            self._bubble.follow(int(self.x), int(self.y))
 
         self._trail.tick(now)
 
@@ -1059,7 +1105,23 @@ class PetWindow(Gtk.Window):
 
         if self._state == FLOATING:
             self._anim_ms = ANIM_FLOAT_MS
-            fs = self.fs_float_r if self._facing_right else self.fs_float_l
+
+            # z-axis: update depth, bounce at limits
+            self.z += self._vz * Z_SPEED * dt
+            if self.z <= Z_MIN:
+                self.z   = Z_MIN
+                self._vz = abs(self._vz) if self._vz else 0.0
+            elif self.z >= Z_MAX:
+                self.z   = Z_MAX
+                self._vz = -abs(self._vz) if self._vz else 0.0
+
+            # back-view when moving away from viewer
+            if self._vz < -0.05:
+                fs = self.fs_back_float_r if self._facing_right else self.fs_back_float_l
+            elif self._facing_right:
+                fs = self.fs_float_r
+            else:
+                fs = self.fs_float_l
             if self.frame_set is not fs:
                 self.frame_set = fs
 
@@ -1225,9 +1287,10 @@ class PetWindow(Gtk.Window):
         self._prev_ty = self.y
 
     def _start_float(self):
-        vx, vy = random.choice(_FLOAT_DIRS)
+        vx, vy, vz = random.choice(_FLOAT_DIRS)
         self._vx = vx
         self._vy = vy
+        self._vz = vz
         self._facing_right = vx >= 0
         self._state     = FLOATING
         self._state_end = time.monotonic() + random.uniform(*FLOAT_SECS)
@@ -1238,6 +1301,7 @@ class PetWindow(Gtk.Window):
         vx, vy = random.choice(_WALK_DIRS)
         self._vx = vx
         self._vy = vy
+        self._vz = 0.0
         self._facing_right = vx >= 0
         self._state     = WALKING
         self._state_end = time.monotonic() + random.uniform(*WALK_SECS)

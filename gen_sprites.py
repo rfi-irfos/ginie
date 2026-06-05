@@ -59,6 +59,58 @@ def thick_line(draw, x0, y0, x1, y1, color, w=5):
         py = int(y0 + t * (y1 - y0))
         draw.ellipse([px - hw, py - hw, px + hw, py + hw], fill=color)
 
+def draw_hat_back(draw, cx, head_top, t):
+    """Hat seen from behind — cone shape, gold band visible."""
+    tilt   = int(math.sin(t * 2 * math.pi) * 2)
+    tip_x  = cx + tilt
+    tip_y  = head_top - 34
+    base_y = head_top + 4
+    bw     = 17
+    poly(draw, [(tip_x - 2, tip_y), (cx - bw, base_y), (cx + bw, base_y)], HAT_SHADOW)
+    poly(draw, [(tip_x,     tip_y + 2), (cx - 6, base_y), (cx + 6, base_y)], HAT_MID)
+    draw.rectangle([cx - bw - 1, base_y - 5, cx + bw + 1, base_y + 5], fill=HAT_BAND)
+    # small bow-knot at the back of the band
+    for ox in [-5, 5]:
+        ell(draw, cx + ox, base_y, 4, 4, GOLD)
+    ell(draw, cx, base_y, 3, 3, GOLD_LIGHT)
+    ell(draw, tip_x, tip_y, 3, 3, GOLD)
+
+def draw_head_back(draw, cx, cy):
+    """Smooth back of head, no face."""
+    r = 21
+    ell(draw, cx + 2, cy + 2, r, r, BODY_SHADOW)
+    ell(draw, cx,     cy,     r, r, BODY_MID)
+    # highlight (shifts to top-right from behind)
+    ell(draw, cx + 6, cy - 8, 9, 7, BODY_LIGHT)
+    ell(draw, cx + 4, cy - 12, 5, 4, BODY_BRIGHT)
+    # left ear visible from behind (on right side of back view)
+    ell(draw, cx - r + 2, cy + 3, 5, 7, BODY_MID)
+    ell(draw, cx - r + 1, cy + 3, 3, 5, BODY_LIGHT)
+
+def draw_torso_back(draw, cx, chest_y):
+    """Back of barrel chest — two vertical muscle highlights."""
+    ell(draw, cx + 3, chest_y + 2, 26, 18, BODY_SHADOW)
+    ell(draw, cx,     chest_y,     24, 17, BODY_MID)
+    # back muscle highlights
+    ell(draw, cx - 6, chest_y - 4, 7, 10, BODY_LIGHT)
+    ell(draw, cx + 7, chest_y - 4, 6,  9, BODY_MID)
+    belly_y = chest_y + 20
+    ell(draw, cx + 2, belly_y + 1, 18, 14, BODY_SHADOW)
+    ell(draw, cx,     belly_y,     17, 13, BODY_MID)
+    ell(draw, cx + 5, belly_y - 2,  6,  7, BODY_LIGHT)
+
+def draw_arms_crossed_back(draw, cx, chest_y, t):
+    """Crossed arms from behind — shows upper arms and cuffs."""
+    bob = int(math.sin(t * 2 * math.pi) * 1)
+    ay  = chest_y + 4 + bob
+    for sign in [-1, 1]:
+        thick_line(draw, cx + sign * 24, ay - 2, cx + sign * 10, ay + 8, BODY_MID, w=9)
+        ell(draw, cx + sign * 20, ay - 1, 7, 5, GOLD)
+        ell(draw, cx + sign * 20, ay - 1, 5, 3, GOLD_LIGHT)
+    # crossed forearms on the back
+    thick_line(draw, cx - 10, ay + 6, cx + 12, ay + 10, BODY_SHADOW, w=8)
+    thick_line(draw, cx + 10, ay + 6, cx - 12, ay + 10, BODY_MID,    w=8)
+
 def soft_glow(img, cx, cy, r, col):
     ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d  = ImageDraw.Draw(ov)
@@ -389,6 +441,14 @@ def make_frame(mode, frame_idx, total_frames):
         arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
         tail_a     = 5
         expression = "sleepy"
+    elif mode == "back_float":
+        head_cy    = int(62 + bob)
+        tail_a     = 9
+        expression = None   # back-view, no face
+    elif mode == "back_walk":
+        head_cy    = int(60 + bob * 0.5)
+        tail_a     = 14
+        expression = None
     else:  # grab
         head_cy    = int(62 + bob * 0.3)
         arm_fn     = lambda d, c, cy: draw_arms_grab(d, c, cy)
@@ -401,6 +461,18 @@ def make_frame(mode, frame_idx, total_frames):
 
     img  = soft_glow(img, cx, chest_y, 52, GLOW_COL)
     draw = ImageDraw.Draw(img)
+
+    # back-view branch — no face
+    if mode in ("back_float", "back_walk"):
+        draw_smoke_tail(draw, cx, waist_y, t, amplitude=tail_a)
+        draw_sash(draw, cx, waist_y)
+        draw_torso_back(draw, cx, chest_y)
+        draw_arms_crossed_back(draw, cx, chest_y, t)
+        draw_head_back(draw, cx, head_cy)
+        draw_hat_back(draw, cx, head_top, t)
+        soft = img.filter(ImageFilter.GaussianBlur(radius=0.7))
+        img  = Image.blend(soft, img, 0.82)
+        return img
 
     draw_smoke_tail(draw, cx, waist_y, t, amplitude=tail_a)
     draw_sash(draw, cx, waist_y)
@@ -416,7 +488,9 @@ def make_frame(mode, frame_idx, total_frames):
 
 # ── generate ──────────────────────────────────────────────────────────────────
 
-SETS = {"float": 6, "walk": 6, "whee": 6, "sleep": 4, "poof_expand": 4, "poof_shrink": 4}
+SETS = {"float": 6, "walk": 6, "whee": 6, "sleep": 4,
+        "back_float": 6, "back_walk": 6,
+        "poof_expand": 4, "poof_shrink": 4}
 
 # grab — single tilted frame
 grab = make_frame("grab", 0, 1)
