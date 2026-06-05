@@ -1,5 +1,7 @@
 # Ginie
 
+**GitHub:** https://github.com/rfi-irfos/ginie
+
 An offline AI assistant that lives on a USB stick and fits on your keychain.
 
 Plug into any Linux machine. No internet. No account. No cloud. Just Ginie.
@@ -14,17 +16,52 @@ plug in usb  ->  bash START_ASSISTANT.sh  ->  working AI agent
 
 ---
 
+## Run from your machine (no USB needed)
+
+If you just want to build and run Ginie directly on your Linux machine:
+
+```bash
+# 1. install system deps (Ubuntu/Debian)
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0
+pip install pillow
+
+# 2. clone
+git clone https://github.com/rfi-irfos/ginie ~/ginie
+cd ~/ginie
+
+# 3. generate sprites
+python3 gen_sprites.py
+
+# 4. wire the genie command (one time)
+mkdir -p ~/.local/bin
+echo '#!/usr/bin/env bash' > ~/.local/bin/ginie
+echo 'exec python3 '"$HOME"'/ginie/Ginie.py "$@"' >> ~/.local/bin/ginie
+chmod +x ~/.local/bin/ginie
+
+# make sure ~/.local/bin is in PATH (add to ~/.bashrc if missing)
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# 5. launch
+ginie
+```
+
+After step 4, open any new terminal and just type `ginie`.
+
+> Ollama + model weights are optional for the desktop pet — the sprite, animations,
+> and right-click menu all work without them. Chat will show "offline" until Ollama
+> is running (see USB setup below).
+
 ## What it is
 
-- Desktop pet that lives on your screen (floats, walks, poofs around)
-- Click or right-click her to open the chat window
-- Fully streaming responses with markdown rendering
-- Think mode for deeper reasoning on complex tasks
-- Offline file search across the entire USB volume
+- Desktop pet that lives on your screen — floats, walks, poofs, zooms in and out in 3D
+- Materialises from a tiny speck on launch, then drifts around your desktop
+- Right-click for actions: chat, teleport, walk, float, sleep, quit
+- Fully streaming chat with markdown rendering (needs Ollama + model)
 - Voice input (German by default, configurable)
-- Brings its own Ollama binary and LLM weights — nothing installed on the host
+- USB mode: brings its own Ollama binary and LLM weights — nothing installed on the host
 
-## Quick start
+## USB quick start
 
 Plug in the USB stick, open a terminal there, and run:
 
@@ -34,9 +71,9 @@ bash START_ASSISTANT.sh
 
 That is it. Ginie appears on your desktop.
 
-## One-time host setup (optional but recommended)
+## One-time USB host setup (optional)
 
-Run this once on a machine you use regularly to get the `ginie` command:
+Run this once on a machine you use regularly to get the `ginie` command from USB:
 
 ```bash
 bash setup_autostart.sh
