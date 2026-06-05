@@ -417,32 +417,30 @@ def draw_arms_drifting(draw, cx, chest_y, t):
     swing = math.sin(t * 2 * math.pi) * 8
     ay    = chest_y + 2
     for sign in [-1, 1]:
-        sx = cx + sign * 24
-        ex = cx + sign * 18 + int(swing * sign * 0.4)
-        ey = ay + 16
+        sx = cx + sign * 20       # was 24
+        ex = cx + sign * 14 + int(swing * sign * 0.4)  # was 18
+        ey = ay + 11              # was 16
         thick_line(draw, sx, ay, ex, ey, BODY_MID, w=9)
         fx = ex + int(swing * sign * 0.3)
-        fy = ey + 14
+        fy = ey + 9               # was 14
         thick_line(draw, ex, ey, fx, fy, BODY_MID, w=8)
         ell(draw, fx, fy + 2, 7, 6, BODY_LIGHT)
-        ell(draw, fx, fy + 4, 7, 5, GOLD)             # wrist cuff
-        ell(draw, fx, fy + 4, 5, 3, GOLD_LIGHT)
+        ell(draw, fx, fy + 3, 7, 5, GOLD)             # wrist cuff
+        ell(draw, fx, fy + 3, 5, 3, GOLD_LIGHT)
 
 def draw_arms_scared(draw, cx, chest_y, t):
     """Both arms flung UP in panic — thrown above head level."""
     shake = int(math.sin(t * 2 * math.pi) * 2)
     ay    = chest_y + 2 + shake
     for sign in [-1, 1]:
-        sx = cx + sign * 18       # shoulder — close to body
-        # upper arm: sharp diagonal outward + up
-        ex = cx + sign * 36
-        ey = ay - 26
+        sx = cx + sign * 14       # shoulder
+        ex = cx + sign * 25       # was 36 — one-third shorter reach
+        ey = ay - 18              # was 26
         thick_line(draw, sx, ay, ex, ey, BODY_MID,   w=10)
-        # forearm: continues steeply upward
-        fx = cx + sign * 30
-        fy = ey - 24               # fists end up well above head
+        fx = cx + sign * 20       # was 30
+        fy = ey - 16              # was 24
         thick_line(draw, ex, ey, fx, fy, BODY_LIGHT, w=9)
-        ell(draw, fx, fy - 4, 7, 6, BODY_BRIGHT)     # fist
+        ell(draw, fx, fy - 3, 7, 6, BODY_BRIGHT)     # fist
         ell(draw, fx, fy + 1,  8, 6, GOLD)            # wrist cuff
         ell(draw, fx, fy + 1,  5, 3, GOLD_LIGHT)
 
@@ -450,13 +448,13 @@ def draw_arms_grab(draw, cx, chest_y):
     """Arms up — surprised/grabbed pose."""
     ay = chest_y - 2
     for sign in [-1, 1]:
-        sx = cx + sign * 22
-        ex = cx + sign * 30
-        ey = ay - 16
+        sx = cx + sign * 16       # was 22
+        ex = cx + sign * 22       # was 30
+        ey = ay - 11              # was 16
         thick_line(draw, sx, ay, ex, ey, BODY_MID, w=9)
         ell(draw, ex, ey - 2, 7, 6, BODY_LIGHT)
-        ell(draw, sx, ay,     7, 5, GOLD)
-        ell(draw, sx, ay,     5, 3, GOLD_LIGHT)
+        ell(draw, ex, ey + 1, 7, 5, GOLD)            # cuff at wrist, not shoulder
+        ell(draw, ex, ey + 1, 5, 3, GOLD_LIGHT)
 
 # ── poof ─────────────────────────────────────────────────────────────────────
 
