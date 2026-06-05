@@ -1346,6 +1346,7 @@ class PetWindow(Gtk.Window):
 
         # dive + reaction state
         self._dive_phase    = None
+        self._dive_deadline = 0.0
         self._dive_in_name  = ""
         self._dive_out_name = ""
         self._dive_enter    = (0.0, 0.0)
@@ -1409,6 +1410,13 @@ class PetWindow(Gtk.Window):
                 self._try_throw()
         else:
             self._update_state(now, dt)
+
+        # DEPTH SAFETY NET: any state that isn't deliberately animating depth eases
+        # z back to neutral every frame, so he can never get marooned as a tiny dot
+        # (or a giant) — e.g. after a folder dive shrinks him. DIVING/SPAWNING grow
+        # on purpose; FLOATING runs its own z bounce logic.
+        if self._state not in (DIVING, SPAWNING, FLOATING, DRAGGED):
+            self.z += (Z_NEUTRAL - self.z) * 3.0 * dt
 
         # resize window when z changes (keeps sprite center pinned).
         # floor at ~22px: tiny enough to read as a folder-speck, big enough that
@@ -2015,6 +2023,7 @@ class PetWindow(Gtk.Window):
         self._dive_enter    = (x1, y1)
         self._dive_exit     = (x2, y2)
         self._dive_phase    = "approach"
+        self._dive_deadline = time.monotonic() + 10.0   # watchdog: never strand tiny
         self._vx = self._vy = self._vz = 0.0
         self._state    = DIVING
         self.frame_idx = 0
@@ -2022,6 +2031,12 @@ class PetWindow(Gtk.Window):
         self.say("dive_in", force=True, f=n1)
 
     def _update_dive(self, now, dt):
+        # watchdog — if a dive ever overruns, bail back to neutral size and roam
+        if now >= self._dive_deadline:
+            self.z = Z_NEUTRAL
+            self._dive_phase = None
+            self._start_explore()
+            return
         if self._dive_phase == "approach":
             self._anim_ms = ANIM_FLOAT_MS
             ex, ey = self._dive_enter
@@ -2077,9 +2092,10 @@ class PetWindow(Gtk.Window):
         elif self._dive_phase == "exit":
             self._anim_ms = ANIM_POOF_MS
             self.frame_set = self.fs_poof_expand
-            # grow back up to neutral size at the exit folder
-            self.z += (Z_NEUTRAL - self.z) * 4.0 * dt
-            if self.frame_idx >= len(self.fs_poof_expand) - 1 and self.z > Z_NEUTRAL * 0.85:
+            # grow back up to neutral size at the exit folder — complete on the size
+            # threshold alone (no frame-index dependency that could strand him tiny)
+            self.z += (Z_NEUTRAL - self.z) * 5.0 * dt
+            if self.z > Z_NEUTRAL * 0.92:
                 self.z = Z_NEUTRAL
                 self._dive_phase = None
                 self._start_excited()
