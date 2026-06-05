@@ -1,50 +1,146 @@
-# USB Assistant — Ginie
+# Ginie
 
-A portable desktop pet + local AI assistant that runs fully offline from this USB stick.
-No installation needed on the host machine (beyond Python dependencies).
+An offline AI assistant that lives on a USB stick and fits on your keychain.
+
+Plug into any Linux machine. No internet. No account. No cloud. Just Ginie.
+
+Airplane mode? Hotel with no wifi? Dead zone in the mountains? Power outage?
+Ginie does not care. She runs entirely from the stick, brings her own AI model,
+and is ready to chat, search your files, and help you think — anywhere.
+
+```
+plug in usb  ->  bash START_ASSISTANT.sh  ->  working AI agent
+```
+
+---
+
+## What it is
+
+- Desktop pet that lives on your screen (floats, walks, poofs around)
+- Click or right-click her to open the chat window
+- Fully streaming responses with markdown rendering
+- Think mode for deeper reasoning on complex tasks
+- Offline file search across the entire USB volume
+- Voice input (German by default, configurable)
+- Brings its own Ollama binary and LLM weights — nothing installed on the host
 
 ## Quick start
 
-Double-click or run from a terminal:
+Plug in the USB stick, open a terminal there, and run:
 
 ```bash
 bash START_ASSISTANT.sh
 ```
 
-Ginie appears as a walking character on your desktop. Right-click her to open the chat or trigger voice input.
+That is it. Ginie appears on your desktop.
 
-## Requirements (must be installed on the host)
+## One-time host setup (optional but recommended)
+
+Run this once on a machine you use regularly to get the `ginie` command:
+
+```bash
+bash setup_autostart.sh
+```
+
+After that, any terminal on that machine: type `ginie`, hit enter.
+
+## Requirements on the host machine
+
+The only things that must already be installed:
 
 - Python 3.8+
-- `pip install pillow vosk requests`
-- `arecord` (ALSA utils, for voice — `sudo apt install alsa-utils`)
+- `python3-gi` and `python3-gi-cairo` (GTK3 bindings — pre-installed on Ubuntu/Debian)
+- `pip install pillow` (image handling)
 
-## What's on this stick
+For voice input (optional):
+- `pip install vosk`
+- `sudo apt install alsa-utils` (for `arecord`)
+
+Everything else — the AI model, the Ollama runtime, the sprite frames — lives on the stick.
+
+## What is on the stick
 
 ```
-START_ASSISTANT.sh        launch script (path-agnostic, works from any mount point)
+Ginie.py                    main application (desktop pet + chat)
+START_ASSISTANT.sh          launch script, path-agnostic from any mount point
+setup_autostart.sh          one-time setup to get the `ginie` terminal command
+gen_sprites.py              regenerate sprite frames if needed
+
 usb_assistant/
-  assistent.py            main application
-  frames/                 sprite animation frames
+  assistent.py              legacy browser-based interface (fallback / alternative)
+  frames/                   sprite animation frames (float, walk, poof, ghost)
   models/
-    vosk-model-small-de-0.15/   offline speech recognition model (German)
+    vosk-model-small-de-0.15/   offline speech recognition model
+
 ollama_portable/
-  ollama                  portable Ollama binary
-  models/                 LLM weights (qwen2.5-coder:1.5b)
+  ollama                    portable Ollama binary (copy to /tmp on launch, FAT32-safe)
+  models/                   LLM weights — qwen3:0.6b by default
+  start_ollama.sh           manual start script for debugging
 ```
+
+The model weights and Ollama binary are NOT in this git repo (too large).
+See setup instructions below for how to populate them onto a fresh stick.
+
+## Populating a fresh USB stick
+
+```bash
+# 1. clone this repo onto the stick
+git clone https://github.com/rfi-irfos/ginie /media/yourname/GINIE
+
+# 2. download the Ollama binary
+curl -L https://ollama.com/download/ollama-linux-amd64 \
+     -o /media/yourname/GINIE/ollama_portable/ollama
+chmod +x /media/yourname/GINIE/ollama_portable/ollama
+
+# 3. pull the model onto the stick
+OLLAMA_MODELS=/media/yourname/GINIE/ollama_portable/models \
+  /media/yourname/GINIE/ollama_portable/ollama pull qwen3:0.6b
+
+# 4. done — eject and carry
+```
+
+Total size on stick: roughly 1.2 GB (fits on any 2 GB+ USB drive).
 
 ## How it works
 
-1. On launch, Ginie checks if Ollama is already running on port 11434.
-2. If not, it starts the portable Ollama binary from this stick, pointing it at the local `models/` folder.
-3. Voice wake word: say "Hey Ginie" — the listener runs in the background using the bundled Vosk model.
-4. File search scans the entire USB volume (not just the assistant folder).
+1. `START_ASSISTANT.sh` finds its own location regardless of mount point.
+2. Ginie copies the portable Ollama binary to `/tmp` (FAT32 has no execute bit).
+3. Ollama starts on port 11435 (separate from any system Ollama on 11434).
+4. The model prewarmed into the KV cache — first response is fast.
+5. The GTK3 pet window appears. Everything from here runs offline.
+
+## Changing the model
+
+Edit the `MODEL` line near the top of `Ginie.py`:
+
+```python
+MODEL = "qwen3:0.6b"   # change to any model you have pulled onto the stick
+```
+
+Smaller models (0.6b) respond in ~1 second on most hardware.
+Larger models (3b, 7b) need a bigger stick and more patience.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
+| Blank screen / no sprite | `python3 gen_sprites.py` to regenerate frames |
 | "vosk not found" | `pip install vosk` |
-| No mic input | Check `arecord -l` and ensure a capture device is visible |
-| Ollama not responding | Run `bash ollama_portable/start_ollama.sh` manually to see errors |
-| Blank sprite | Frames missing — `usb_assistant/frames/` must contain `frame_*.png` files |
+| No mic input | `arecord -l` to check capture devices |
+| Ollama not responding | `bash ollama_portable/start_ollama.sh` to see errors |
+| ETXTBSY error on binary | Previous Ginie still running — `pkill -f ginie_ollama_bin` |
+| Model not found (404) | System Ollama grabbed port 11435 — `pkill ollama`, relaunch |
+
+## The idea
+
+Most AI tools require a subscription, an internet connection, and a company
+that can read your conversations. Ginie requires a USB port.
+
+Carry her on your keychain. Use her on a plane, in a server room with no wifi,
+on a borrowed laptop in a foreign country, on a machine that has never seen
+the internet. The model runs locally, the data stays on your stick, and when
+you pull it out nothing is left behind on the host.
+
+---
+
+Built by Zabih and Simeon at RFI-IRFOS.
