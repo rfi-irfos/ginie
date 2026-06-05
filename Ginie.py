@@ -979,10 +979,10 @@ class PetWindow(Gtk.Window):
         self._prev_ty          = self.y
 
         # drag + throw
-        self._drag_ox      = 0.0
-        self._drag_oy      = 0.0
         self._press_x      = 0.0
         self._press_y      = 0.0
+        self._press_wx     = 0.0
+        self._press_wy     = 0.0
         self._did_drag     = False
         self._drag_samples = []   # (time, x, y) ring for velocity estimation
         self._throw_vx     = 0.0
@@ -1256,9 +1256,7 @@ class PetWindow(Gtk.Window):
         self._last_user_action = time.monotonic()
         self._press_x = ev.x_root
         self._press_y = ev.y_root
-        wx, wy = self.get_position()   # actual window pos, not tracked self.x/y (can drift)
-        self._drag_ox = ev.x_root - wx
-        self._drag_oy = ev.y_root - wy
+        self._press_wx, self._press_wy = self.get_position()  # window pos at moment of click
         self._did_drag = False
         if ev.button == 3:
             self._show_menu(ev)
@@ -1272,8 +1270,9 @@ class PetWindow(Gtk.Window):
             self._state    = DRAGGED
             self._vx = self._vy = 0.0
             self.frame_set = self.fs_grab
-            self.x = ev.x_root - self._drag_ox
-            self.y = ev.y_root - self._drag_oy
+            # delta drag: coordinate-space agnostic — works on any monitor
+            self.x = self._press_wx + (ev.x_root - self._press_x)
+            self.y = self._press_wy + (ev.y_root - self._press_y)
             ix, iy = int(self.x), int(self.y)
             self.move(ix, iy)
             self._bubble.follow(ix, iy)
