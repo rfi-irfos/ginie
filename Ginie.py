@@ -1072,8 +1072,7 @@ class TrailOverlay(Gtk.Window):
         self.set_app_paintable(True)
         screen = Gdk.Screen.get_default()
         # span entire virtual desktop so footprints land correctly on any monitor
-        sw = screen.get_width()
-        sh = screen.get_height()
+        sw, sh = virtual_desktop_size()
         self.set_default_size(sw, sh)
         self.move(0, 0)
         self._composited = screen.is_composited()
