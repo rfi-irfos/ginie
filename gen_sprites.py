@@ -339,18 +339,19 @@ def _face_happy(draw, cx, cy):
     _goatee(draw, cx, sy + 6)
 
 def _face_scared(draw, cx, cy):
-    """Full panic — wide white eyes, open O mouth, brows shot up."""
-    _brows_raised(draw, cx, cy, extra=5)
+    """Surprised — slightly wide eyes, small open mouth, raised brows."""
+    _brows_raised(draw, cx, cy, extra=2)
     for ex in [cx - 9, cx + 9]:
-        ell(draw, ex, cy,      8, 8, EYE_WHITE)
-        ell(draw, ex, cy + 1,  5, 5, EYE_IRIS)
-        ell(draw, ex + 1, cy,  3, 3, EYE_PUPIL)
-        ell(draw, ex - 2, cy - 5, 2, 2, (255, 255, 255, 220))
+        ell(draw, ex, cy - 1,  7, 7, EYE_WHITE)
+        ell(draw, ex, cy,      4, 4, EYE_IRIS)
+        ell(draw, ex + 1, cy - 1, 2, 2, EYE_PUPIL)
+        ell(draw, ex - 1, cy - 4, 2, 2, (255, 255, 255, 200))
     _nose(draw, cx, cy)
-    sy = cy + 10
-    ell(draw, cx + 2, sy + 3, 9, 8, LIP)               # O-mouth outline
-    ell(draw, cx + 2, sy + 3, 6, 5, (20, 12, 40, 255)) # dark interior
-    _goatee(draw, cx, sy + 12)
+    sy = cy + 11
+    # small surprised "oh" — not a screaming O
+    ell(draw, cx + 1, sy + 2, 6, 5, LIP)
+    ell(draw, cx + 1, sy + 2, 4, 3, (20, 12, 40, 255))
+    _goatee(draw, cx, sy + 8)
 
 # ── sash ──────────────────────────────────────────────────────────────────────
 
