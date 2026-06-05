@@ -727,16 +727,28 @@ class ChatWindow(Gtk.Window):
 FLOATING = "floating"    # hovering drift — default mode
 HOVERING = "hovering"    # bob in place, no translation
 WALKING  = "walking"     # legs out, walking along screen bottom area
+CROSSING = "crossing"    # target-directed walk across monitors
 POOFING  = "poofing"     # teleport sequence
 GHOSTING = "ghosting"    # invisible walk — only footsteps visible, poof re-appear
 SPAWNING = "spawning"    # materialise from Z_MIN on first launch
 DRAGGED  = "dragged"     # user is dragging
 THROWN   = "thrown"      # released from drag with velocity — momentum + bounce
 
+# Moods — govern movement personality; rotate every 40-120 s
+MOOD_CURIOUS = "curious"   # balanced explorer, occasional screen crossings
+MOOD_HYPER   = "hyper"     # high energy: walks, crosses, poofs, talks
+MOOD_SHY     = "shy"       # stays on current monitor, hover-heavy
+MOOD_PATROL  = "patrol"    # systematic left↔right sweeps across all monitors
+MOOD_DREAMY  = "dreamy"    # z-axis dives, back views, slow and introspective
+
+MOOD_MIN_S = 40
+MOOD_MAX_S = 120
+
 import math as _math
 
 FLOAT_SPEED         = 55.0   # px/sec while drifting
 WALK_SPEED          = 75.0   # px/sec while walking
+CROSS_SPEED         = 90.0   # px/sec for purposeful cross-screen walks
 FLOAT_SECS          = (6, 12)
 WALK_SECS           = (6, 12)
 INACTIVITY_WANDER_S = 20
@@ -1023,6 +1035,18 @@ class PetWindow(Gtk.Window):
         self._bubble = BubbleWindow(self)
         self._trail  = TrailManager()
 
+        # multi-monitor map (sorted left→right)
+        self._monitors = []
+        self._detect_monitors()
+
+        # mood system
+        self._mood     = MOOD_CURIOUS
+        self._mood_end = time.monotonic() + random.uniform(MOOD_MIN_S, MOOD_MAX_S)
+
+        # crossing target
+        self._cross_target_x = 0.0
+        self._cross_target_y = 0.0
+
         self.connect("configure-event", self._on_configure)
         self.move(int(self.x), int(self.y))
         self.show_all()
@@ -1054,6 +1078,8 @@ class PetWindow(Gtk.Window):
         now = time.monotonic()
         dt  = min(now - self._last_t, 0.05)
         self._last_t = now
+
+        self._tick_mood(now)
 
         if self._state == DRAGGED:
             # begin_move_drag lets the WM eat the button-release — detect it here
@@ -1091,7 +1117,7 @@ class PetWindow(Gtk.Window):
                 new_idx = (self.frame_idx + 1) % len(self.frame_set)
             if new_idx != self.frame_idx or self.current is not self.frame_set[new_idx]:
                 # foot-strike: frames 0 and 3 of the walk cycle = foot hits ground
-                if self._state == WALKING and new_idx in (0, 3):
+                if self._state in (WALKING, CROSSING) and new_idx in (0, 3):
                     flip = (new_idx == 3)
                     foot_y = self.y + SPR_H - 14
                     offset = -10 if not flip else 10
@@ -1200,8 +1226,28 @@ class PetWindow(Gtk.Window):
             self._bubble.follow(ix, iy)
 
             if now >= self._state_end or hit_edge:
-                # back to floating after walk
                 self._start_float()
+
+        elif self._state == CROSSING:
+            self._anim_ms = ANIM_WALK_MS
+            fs = self.fs_walk_r if self._facing_right else self.fs_walk_l
+            if self.frame_set is not fs:
+                self.frame_set = fs; self.frame_idx = 0
+
+            dx = self._cross_target_x - (self.x + self._disp_w * 0.5)
+            if abs(dx) < 40 or now >= self._state_end:
+                self._start_hover()
+            else:
+                self._vx = 1.0 if dx > 0 else -1.0
+                self._facing_right = self._vx > 0
+                nx = self.x + self._vx * CROSS_SPEED * dt
+                # ease y toward target row over the whole crossing
+                ny = self.y + (self._cross_target_y - self.y) * 0.025
+                self.x, self.y = self._clamp(nx, ny)
+                ix, iy = int(self.x), int(self.y)
+                self.move(ix, iy)
+                self._bubble.follow(ix, iy)
+                self._prev_tx, self._prev_ty = self.x, self.y
 
         elif self._state == POOFING:
             self._anim_ms = ANIM_POOF_MS
@@ -1309,33 +1355,113 @@ class PetWindow(Gtk.Window):
         return nx, ny
 
     def _pick_next_move(self, now):
-        roll = random.random()
-        if roll < 0.30:
-            self._start_walk()
-        elif roll < 0.52:
-            self._start_float()
-        elif roll < 0.67:
-            self._start_hover()       # bob in place
-        elif roll < 0.83:
-            self._start_poof()
+        r = random.random()
+        multi = len(self._monitors) > 1
+
+        if self._mood == MOOD_CURIOUS:
+            if   r < 0.18: self._start_walk()
+            elif r < 0.36: self._start_float()
+            elif r < 0.50: self._start_hover()
+            elif r < 0.64: self._start_poof()
+            elif r < 0.78: self._start_ghost()
+            elif multi:    self._start_cross_screen()
+            else:          self._start_float()
+
+        elif self._mood == MOOD_HYPER:
+            if   r < 0.28: self._start_walk()
+            elif r < 0.52 and multi: self._start_cross_screen()
+            elif r < 0.68: self._start_poof()
+            elif r < 0.84: self._start_float()
+            else:          self._start_ghost()
+
+        elif self._mood == MOOD_SHY:
+            if   r < 0.44: self._start_hover()
+            elif r < 0.70: self._start_float(stay_on_monitor=True)
+            elif r < 0.86: self._start_walk()
+            else:          self._start_poof()
+
+        elif self._mood == MOOD_PATROL:
+            if   r < 0.62 and multi: self._start_cross_screen()
+            elif r < 0.82: self._start_walk()
+            else:          self._start_hover()
+
+        elif self._mood == MOOD_DREAMY:
+            if   r < 0.50: self._start_float(z_bias=True)
+            elif r < 0.70: self._start_hover()
+            elif r < 0.86: self._start_ghost()
+            else:          self._start_poof()
+
         else:
-            self._start_ghost()
+            if   r < 0.30: self._start_walk()
+            elif r < 0.52: self._start_float()
+            elif r < 0.67: self._start_hover()
+            elif r < 0.83: self._start_poof()
+            else:          self._start_ghost()
+
+    # ── monitor + mood ────────────────────────────────────────────────────────
+
+    def _detect_monitors(self):
+        display = Gdk.Display.get_default()
+        n = display.get_n_monitors()
+        self._monitors = []
+        for i in range(n):
+            geo = display.get_monitor(i).get_geometry()
+            self._monitors.append((geo.x, geo.y, geo.width, geo.height))
+        self._monitors.sort(key=lambda m: m[0])
+
+    def _current_monitor_idx(self):
+        cx = self.x + self._disp_w * 0.5
+        for i, (mx, my, mw, mh) in enumerate(self._monitors):
+            if mx <= cx < mx + mw:
+                return i
+        return 0
+
+    def _tick_mood(self, now):
+        if now < self._mood_end:
+            return
+        moods = [MOOD_CURIOUS, MOOD_HYPER, MOOD_SHY, MOOD_PATROL, MOOD_DREAMY]
+        self._mood = random.choice([m for m in moods if m != self._mood])
+        self._mood_end = now + random.uniform(MOOD_MIN_S, MOOD_MAX_S)
+        quips = {
+            MOOD_CURIOUS: ["hmm, what's over there?", "i wonder...", "exploring."],
+            MOOD_HYPER:   ["let's gooooo!!", "SO much energy", "zooooom"],
+            MOOD_SHY:     ["i'll just... stay here.", "quiet time.", "..."],
+            MOOD_PATROL:  ["checking the perimeter.", "left. right. left.", "on patrol."],
+            MOOD_DREAMY:  ["*floats away*", "deep thoughts.", "...zoning out."],
+        }
+        if random.random() < 0.5:
+            line = random.choice(quips[self._mood])
+            GLib.timeout_add(400, lambda: self.show_bubble(line, 3500) or False)
+
+    # ── movement ──────────────────────────────────────────────────────────────
 
     def _reset_trail_pos(self):
         """Sync trail baseline to current position — prevents large delta spikes."""
         self._prev_tx = self.x
         self._prev_ty = self.y
 
-    def _start_float(self):
-        # filter directions: when near an edge, only allow inward-pointing ones
-        cx_n = (self.x - self.sw * 0.5) / (self.sw * 0.5)   # -1..+1
+    def _start_float(self, z_bias=False, stay_on_monitor=False):
+        cx_n = (self.x - self.sw * 0.5) / (self.sw * 0.5)
         cy_n = (self.y - self.sh * 0.5) / (self.sh * 0.5)
         threshold = 0.55
-        candidates = [d for d in _FLOAT_DIRS
+
+        dirs = [d for d in _FLOAT_DIRS if abs(d[2]) > 0.5] if z_bias else list(_FLOAT_DIRS)
+
+        candidates = [d for d in dirs
                       if not (cx_n >  threshold and d[0] >  0.2)
                       and not (cx_n < -threshold and d[0] < -0.2)
                       and not (cy_n >  threshold and d[1] >  0.2)
-                      and not (cy_n < -threshold and d[1] < -0.2)] or list(_FLOAT_DIRS)
+                      and not (cy_n < -threshold and d[1] < -0.2)] or dirs
+
+        if stay_on_monitor and len(self._monitors) > 1:
+            cur = self._current_monitor_idx()
+            if cur == 0:
+                # leftmost — nudge away from right edge to stay home
+                candidates = [d for d in candidates if d[0] < 0.4] or candidates
+            elif cur == len(self._monitors) - 1:
+                # rightmost — nudge away from left edge
+                candidates = [d for d in candidates if d[0] > -0.4] or candidates
+
         vx, vy, vz = random.choice(candidates)
         self._vx = vx
         self._vy = vy
@@ -1389,6 +1515,26 @@ class PetWindow(Gtk.Window):
         self._vx = self._vy    = 0.0
         self.frame_set         = self.fs_poof_expand
         self.frame_idx         = 0
+
+    def _start_cross_screen(self):
+        """Walk with purpose to a landing zone on another monitor."""
+        if len(self._monitors) < 2:
+            self._start_float()
+            return
+        cur = self._current_monitor_idx()
+        others = [i for i in range(len(self._monitors)) if i != cur]
+        tgt_idx = random.choice(others)
+        mx, my, mw, mh = self._monitors[tgt_idx]
+        self._cross_target_x = random.uniform(mx + mw * 0.15, mx + mw * 0.85)
+        self._cross_target_y = random.uniform(self.sh * 0.62, self.sh * 0.80)
+        self._vx = 1.0 if self._cross_target_x > self.x else -1.0
+        self._vy = 0.0
+        self._vz = 0.0
+        self._facing_right = self._vx > 0
+        self._state     = CROSSING
+        self._state_end = time.monotonic() + 55.0   # safety cap
+        self.frame_idx  = 0
+        self._reset_trail_pos()
 
     # ── input ─────────────────────────────────────────────────────────────────
 
