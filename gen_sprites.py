@@ -429,7 +429,7 @@ def draw_arms_drifting(draw, cx, chest_y, t):
 
 def draw_arms_scared(draw, cx, chest_y, t):
     """Both arms flung UP in panic — thrown above head level."""
-    shake = int(math.sin(t * 8 * math.pi) * 3)
+    shake = int(math.sin(t * 2 * math.pi) * 2)
     ay    = chest_y + 2 + shake
     for sign in [-1, 1]:
         sx = cx + sign * 18       # shoulder — close to body
