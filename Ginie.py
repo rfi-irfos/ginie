@@ -10,7 +10,7 @@ gi.require_version('Gdk', '3.0')
 from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
 import cairo
 
-import os, sys, json, threading, subprocess, time, random, glob, io, re
+import os, sys, json, threading, subprocess, time, random, glob, io, re, shutil
 import urllib.request, urllib.error
 
 try:
@@ -829,19 +829,22 @@ class ChatWindow(Gtk.Window):
 # State machine
 # ---------------------------------------------------------------------------
 
-FLOATING  = "floating"   # hovering drift — default mode
-HOVERING  = "hovering"   # bob in place, no translation
-WALKING   = "walking"    # legs out, walking along screen bottom area
-CROSSING  = "crossing"   # target-directed walk across monitors
-EXPLORING = "exploring"  # goal-directed roam toward a waypoint
-DIVING    = "diving"     # shrink, dive into a folder, pop out of another
-REACTING  = "reacting"   # plays a one-off reaction set in place (look/excited/etc.)
-SLEEPING  = "sleeping"   # napping — wakes on any interaction
-POOFING   = "poofing"    # teleport sequence
-GHOSTING  = "ghosting"   # invisible walk — only footsteps visible, poof re-appear
-SPAWNING  = "spawning"   # materialise from Z_MIN on first launch
-DRAGGED   = "dragged"    # user is dragging
-THROWN    = "thrown"     # released from drag with velocity — momentum + bounce
+FLOATING   = "floating"   # hovering drift — default mode
+HOVERING   = "hovering"   # bob in place, no translation
+WALKING    = "walking"    # legs out, walking along screen bottom area
+CROSSING   = "crossing"   # target-directed walk across monitors
+EXPLORING  = "exploring"  # goal-directed roam toward a waypoint
+TRAVERSE   = "traverse"   # full-length dash from one far edge to the opposite
+EDGE_PATROL= "edgepatrol" # laps around the screen perimeter, corner to corner
+DVD        = "dvd"        # DVD-logo bounce — diagonal, ricochets off walls, hunts corners
+DIVING     = "diving"     # shrink, dive into a folder, pop out of another
+REACTING   = "reacting"   # plays a one-off reaction set in place (look/excited/etc.)
+SLEEPING   = "sleeping"   # napping — wakes on any interaction
+POOFING    = "poofing"    # teleport sequence
+GHOSTING   = "ghosting"   # invisible walk — only footsteps visible, poof re-appear
+SPAWNING   = "spawning"   # materialise from Z_MIN on first launch
+DRAGGED    = "dragged"    # user is dragging
+THROWN     = "thrown"     # released from drag with velocity — momentum + bounce
 
 # Moods — govern movement personality; rotate every 40-120 s
 MOOD_CURIOUS = "curious"   # balanced explorer, occasional screen crossings
@@ -860,11 +863,15 @@ WALK_SPEED          = 75.0   # px/sec while walking
 CROSS_SPEED         = 90.0   # px/sec for purposeful cross-screen walks
 EXPLORE_SPEED       = 95.0   # px/sec roaming toward a waypoint
 DIVE_SPEED          = 130.0  # px/sec diving toward a folder
+TRAVERSE_SPEED      = 240.0  # px/sec full-length dash across all screens
+PATROL_SPEED        = 130.0  # px/sec along the perimeter
+DVD_SPEED           = 150.0  # px/sec for the DVD-logo bounce
 ARRIVE_RADIUS       = 55     # px — "reached the waypoint" threshold
 FLOAT_SECS          = (7, 15)
 WALK_SECS           = (6, 12)
 INACTIVITY_WANDER_S = 20
-SLEEP_AFTER_S       = 60     # seconds of no user interaction before napping
+SLEEP_AFTER_S       = 150    # seconds of no user interaction before a cat-nap
+CATNAP_SECS         = (12, 28)  # he wakes himself and resumes wandering
 
 ANIM_FLOAT_MS = 110   # float cycle
 ANIM_WALK_MS  =  85   # walk cycle
@@ -925,6 +932,14 @@ class Sass:
                         "i shall supervise from here."],
         "explore":     ["off i go.", "what's over there...", "adventure time.",
                         "let's see what's around here.", "exploring. don't wait up."],
+        "traverse":    ["coast to coast!", "full send, across everything.",
+                        "outta my way, crossing all screens.", "zoooom, edge to edge."],
+        "patrol":      ["walking the perimeter.", "patrol duty.", "checking the borders.",
+                        "left, right, around we go."],
+        "dvd":         ["DVD mode engaged.", "let's see if i hit the corner...",
+                        "you know you wanna watch this bounce.", "boing. boing. boing."],
+        "dvd_corner":  ["CORNER!!! did you SEE that?!", "PERFECT corner hit. legendary.",
+                        "10/10. nailed the corner.", "i waited my whole life for that corner."],
         "idle_musing": ["i wonder what's in all these folders.", "do you ever just... float?",
                         "i'm basically sentient now, you know.", "it's quiet. i like it.",
                         "i could go for a dive.", "you should take a break too.",
@@ -1330,6 +1345,14 @@ class PetWindow(Gtk.Window):
         self._dive_exit     = (0.0, 0.0)
         self._react_set     = None
 
+        # traverse / patrol / DVD-bounce state
+        self._trav_target_x = 0.0
+        self._trav_y        = self.y
+        self._corners       = []
+        self._corner_goal   = 0
+        self._patrol_legs   = 0
+        self._dvd_corners   = 0
+
         # sass / sentience
         self._sass_last         = 0.0
         self._drag_count        = 0
@@ -1380,9 +1403,11 @@ class PetWindow(Gtk.Window):
         else:
             self._update_state(now, dt)
 
-        # resize window when z changes (keeps sprite center pinned)
-        new_w = max(12, int(SPR_W * self.z))
-        new_h = max(16, int(SPR_H * self.z))
+        # resize window when z changes (keeps sprite center pinned).
+        # floor at ~22px: tiny enough to read as a folder-speck, big enough that
+        # GNOME/Mutter won't spam "window will not be able to paint".
+        new_w = max(22, int(SPR_W * self.z))
+        new_h = max(30, int(SPR_H * self.z))
         if new_w != self._disp_w or new_h != self._disp_h:
             cx = self.x + self._disp_w * 0.5
             cy = self.y + self._disp_h * 0.5
@@ -1450,6 +1475,10 @@ class PetWindow(Gtk.Window):
             self._bubble.follow(ix, iy)
             if random.random() < 0.0006:    # the occasional sleepy mutter
                 self.say("idle_musing")
+            if now >= self._state_end:       # cat-nap over — wake himself, resume life
+                self._last_user_action = now
+                self.say("wake_idle")
+                self._start_explore()
             return
 
         if self._state == REACTING:
@@ -1496,6 +1525,84 @@ class PetWindow(Gtk.Window):
 
         if self._state == DIVING:
             self._update_dive(now, dt)
+            return
+
+        if self._state == TRAVERSE:
+            self._anim_ms = ANIM_WALK_MS
+            self._facing_right = self._vx >= 0
+            fs = self.fs_walk_r if self._facing_right else self.fs_walk_l
+            if self.frame_set is not fs:
+                self.frame_set = fs
+            self._bob_phase += dt * 1.6
+            bob_y = _math.sin(self._bob_phase) * 4
+            nx = self.x + self._vx * TRAVERSE_SPEED * dt
+            ny = self._trav_y + bob_y
+            self.x, self.y = self._clamp(nx, ny)
+            ix, iy = int(self.x), int(self.y)
+            self.move(ix, iy)
+            self._bubble.follow(ix, iy)
+            cx = self.x + self._disp_w * 0.5
+            if (self._vx > 0 and cx >= self._trav_target_x) or \
+               (self._vx < 0 and cx <= self._trav_target_x) or now >= self._state_end:
+                self._start_look_around()
+            return
+
+        if self._state == EDGE_PATROL:
+            self._anim_ms = ANIM_WALK_MS
+            gx, gy = self._corners[self._corner_goal]
+            cx = self.x + self._disp_w * 0.5
+            cy = self.y + self._disp_h * 0.5
+            dx, dy = gx - cx, gy - cy
+            dist = _math.hypot(dx, dy)
+            self._facing_right = dx >= 0
+            fs = self.fs_walk_r if self._facing_right else self.fs_walk_l
+            if self.frame_set is not fs:
+                self.frame_set = fs
+            if dist < 30:
+                self._patrol_legs -= 1
+                if self._patrol_legs <= 0 or now >= self._state_end:
+                    self._start_look_around()
+                else:
+                    self._corner_goal = (self._corner_goal + 1) % 4
+                return
+            self._vx, self._vy = dx / dist, dy / dist
+            nx = self.x + self._vx * PATROL_SPEED * dt
+            ny = self.y + self._vy * PATROL_SPEED * dt
+            self.x, self.y = self._clamp(nx, ny)
+            ix, iy = int(self.x), int(self.y)
+            self.move(ix, iy)
+            self._bubble.follow(ix, iy)
+            return
+
+        if self._state == DVD:
+            self._anim_ms = ANIM_FLOAT_MS
+            self._facing_right = self._vx >= 0
+            fs = self._float_set()
+            if self.frame_set is not fs:
+                self.frame_set = fs
+            nx = self.x + self._vx * DVD_SPEED * dt
+            ny = self.y + self._vy * DVD_SPEED * dt
+            m  = self._margin
+            hit_x = hit_y = False
+            if nx <= m:
+                nx = m;            self._vx = abs(self._vx);  hit_x = True
+            elif nx >= self.sw - m:
+                nx = self.sw - m;  self._vx = -abs(self._vx); hit_x = True
+            if ny <= m:
+                ny = m;            self._vy = abs(self._vy);  hit_y = True
+            elif ny >= self.sh - m:
+                ny = self.sh - m;  self._vy = -abs(self._vy); hit_y = True
+            self.x, self.y = nx, ny
+            ix, iy = int(self.x), int(self.y)
+            self.move(ix, iy)
+            self._bubble.follow(ix, iy)
+            if hit_x and hit_y:                       # the mythical corner hit
+                self._dvd_corners += 1
+                self.say("dvd_corner", force=True)
+                self._start_excited()
+                return
+            if now >= self._state_end:
+                self._start_look_around()
             return
 
         if self._state == HOVERING:
@@ -1717,37 +1824,41 @@ class PetWindow(Gtk.Window):
 
         # exploration is the connective tissue; everything else punctuates it
         if self._mood == MOOD_CURIOUS:
-            if   r < 0.45:            self._start_explore()
+            if   r < 0.34:            self._start_explore()
+            elif r < 0.46:            self._start_traverse()
             elif r < 0.60 and folders:self._start_dive()
-            elif r < 0.72:            self._start_walk()
-            elif r < 0.84:            self._start_look_around()
-            elif r < 0.93 and multi:  self._start_cross_screen()
+            elif r < 0.70:            self._start_walk()
+            elif r < 0.80:            self._start_look_around()
+            elif r < 0.90 and multi:  self._start_cross_screen()
             else:                     self._start_poof()
 
         elif self._mood == MOOD_HYPER:
-            if   r < 0.35:            self._start_explore()
-            elif r < 0.55 and multi:  self._start_cross_screen()
+            if   r < 0.22:            self._start_dvd()           # high energy = DVD time
+            elif r < 0.40:            self._start_traverse()
+            elif r < 0.56 and multi:  self._start_cross_screen()
             elif r < 0.70 and folders:self._start_dive()
             elif r < 0.86:            self._start_walk()
-            else:                     self._start_poof()
+            else:                     self._start_explore()
 
         elif self._mood == MOOD_SHY:
-            if   r < 0.40:            self._start_hover()
-            elif r < 0.62:            self._start_float(stay_on_monitor=True)
-            elif r < 0.82:            self._start_explore()
+            if   r < 0.38:            self._start_hover()
+            elif r < 0.58:            self._start_float(stay_on_monitor=True)
+            elif r < 0.80:            self._start_explore()
             else:                     self._start_look_around()
 
         elif self._mood == MOOD_PATROL:
-            if   r < 0.45 and multi:  self._start_cross_screen()
-            elif r < 0.78:            self._start_explore()
-            elif r < 0.90:            self._start_walk()
-            else:                     self._start_hover()
+            if   r < 0.40:            self._start_edge_patrol()   # the perimeter walker
+            elif r < 0.58:            self._start_traverse()
+            elif r < 0.72 and multi:  self._start_cross_screen()
+            elif r < 0.88:            self._start_explore()
+            else:                     self._start_walk()
 
         elif self._mood == MOOD_DREAMY:
-            if   r < 0.38:            self._start_float(z_bias=True)
-            elif r < 0.58:            self._start_explore()
-            elif r < 0.72 and folders:self._start_dive()
-            elif r < 0.86:            self._start_look_around()
+            if   r < 0.34:            self._start_float(z_bias=True)
+            elif r < 0.50:            self._start_explore()
+            elif r < 0.62:            self._start_dvd()
+            elif r < 0.74 and folders:self._start_dive()
+            elif r < 0.88:            self._start_look_around()
             else:                     self._start_ghost()
 
         else:
@@ -1875,11 +1986,12 @@ class PetWindow(Gtk.Window):
         self._reset_trail_pos()
 
     def _start_sleep(self):
-        """Settle in place and nap until the user interacts."""
+        """Settle in place for a short cat-nap, then wake himself and roam again."""
         self._vx = self._vy = self._vz = 0.0
-        self._state    = SLEEPING
-        self.frame_set = self.fs_sleep
-        self.frame_idx = 0
+        self._state     = SLEEPING
+        self._state_end = time.monotonic() + random.uniform(*CATNAP_SECS)
+        self.frame_set  = self.fs_sleep
+        self.frame_idx  = 0
         self._reset_trail_pos()
 
     # ── folder diving (agnostic Mario-pipe gag) ─────────────────────────────────
@@ -1938,21 +2050,21 @@ class PetWindow(Gtk.Window):
             self._anim_ms = ANIM_POOF_MS
             self.frame_set = self.fs_poof_shrink
             if self.frame_idx >= len(self.fs_poof_shrink) - 1:
-                # vanish, jump to the exit folder, tiny
-                self.hide()
+                # jump (tiny + poof sells the "into the folder" pop) — NO hide()/
+                # show_all(): that churn corrupts the keep-above window on Mutter
+                # and was freezing him after the first dive.
                 ox, oy = self._dive_exit
-                self.z = 0.10
-                self._disp_w = max(12, int(SPR_W * self.z))
-                self._disp_h = max(16, int(SPR_H * self.z))
+                self.z = max(Z_MIN, 0.06)
+                self._disp_w = max(22, int(SPR_W * self.z))
+                self._disp_h = max(30, int(SPR_H * self.z))
                 self.resize(self._disp_w, self._disp_h)
                 self.x = ox - self._disp_w * 0.5
                 self.y = oy - self._disp_h * 0.5
                 self.move(int(self.x), int(self.y))
-                self._bubble.follow(int(self.x), int(self.y))
+                self._bubble.place(self.x, self.y, self._disp_w, self._disp_h)
                 self._dive_phase = "exit"
                 self.frame_set   = self.fs_poof_expand
                 self.frame_idx   = 0
-                self.show_all()
                 self.say("dive_out", force=True, f=self._dive_out_name)
 
         elif self._dive_phase == "exit":
@@ -2060,6 +2172,59 @@ class PetWindow(Gtk.Window):
         self._state_end = time.monotonic() + 55.0   # safety cap
         self.frame_idx  = 0
         self._reset_trail_pos()
+
+    def _start_traverse(self):
+        """Full-length dash from whichever side he's on to the far opposite edge,
+        across every monitor."""
+        m = self._margin
+        going_right = (self.x + self._disp_w * 0.5) < self.sw * 0.5
+        self._trav_target_x = (self.sw - m) if going_right else m
+        self._trav_y = self.y
+        self._vx = 1.0 if going_right else -1.0
+        self._vy = 0.0
+        self._vz = 0.0
+        self._facing_right = going_right
+        self._state     = TRAVERSE
+        self._state_end = time.monotonic() + 40.0
+        self.frame_idx  = 0
+        self._reset_trail_pos()
+        if random.random() < 0.6:
+            self.say("traverse")
+
+    def _start_edge_patrol(self):
+        """Lap the screen perimeter, corner to corner."""
+        m = self._margin
+        self._corners = [(m, m), (self.sw - m, m),
+                         (self.sw - m, self.sh - m), (m, self.sh - m)]
+        cx = self.x + self._disp_w * 0.5
+        cy = self.y + self._disp_h * 0.5
+        nearest = min(range(4), key=lambda i: _math.hypot(
+            self._corners[i][0] - cx, self._corners[i][1] - cy))
+        self._corner_goal  = (nearest + 1) % 4   # head to the next corner
+        self._patrol_legs  = random.randint(4, 7)
+        self._vx = self._vy = self._vz = 0.0
+        self._state     = EDGE_PATROL
+        self._state_end = time.monotonic() + 60.0
+        self.frame_idx  = 0
+        self._reset_trail_pos()
+        if random.random() < 0.5:
+            self.say("patrol")
+
+    def _start_dvd(self):
+        """Classic DVD-logo bounce — diagonal, ricochets off every wall, and if it
+        ever nails a corner, celebrate like it's the moon landing."""
+        ang = random.uniform(0.5, 1.07)            # avoid near-flat angles
+        self._vx = random.choice([-1, 1]) * _math.cos(ang)
+        self._vy = random.choice([-1, 1]) * _math.sin(ang)
+        self._vz = 0.0
+        self._dvd_corners = 0
+        self._facing_right = self._vx >= 0
+        self._state     = DVD
+        self._state_end = time.monotonic() + random.uniform(14.0, 24.0)
+        self.frame_idx  = 0
+        self._reset_trail_pos()
+        if random.random() < 0.7:
+            self.say("dvd")
 
     # ── input ─────────────────────────────────────────────────────────────────
 
@@ -2186,6 +2351,9 @@ class PetWindow(Gtk.Window):
         items = [
             ("Mit Ginie reden",  lambda *_: self._open_chat()),
             ("Erkunden",         lambda *_: self._start_explore()),
+            ("Quer rueber",      lambda *_: self._start_traverse()),
+            ("Rand-Patrouille",  lambda *_: self._start_edge_patrol()),
+            ("DVD-Modus",        lambda *_: self._start_dvd()),
             ("Teleportieren",    lambda *_: (setattr(self, '_vz', 0.0), self._start_poof())),
             ("Laufen lassen",    lambda *_: self._start_walk()),
             ("Schweben lassen",  lambda *_: self._start_float()),
@@ -2258,6 +2426,11 @@ class BubbleWindow(Gtk.Window):
         if visual and screen.is_composited():
             self.set_visual(visual)
         self.connect("draw", self._on_draw)
+        # CLICK-THROUGH: an empty input region means every pointer event passes
+        # straight through to whatever is underneath (your terminal), so the bubble
+        # can never steal your clicks or keyboard focus. Re-applied on every map.
+        self.connect("realize", self._make_click_through)
+        self.connect("map",     self._make_click_through)
 
         # extra bottom padding = tail height so text sits inside the rounded rect
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -2268,21 +2441,16 @@ class BubbleWindow(Gtk.Window):
         self.lbl.set_line_wrap(True)
         self.lbl.set_max_width_chars(26)
         self.lbl.set_margin_top(10)
-        self.lbl.set_margin_bottom(6)
+        self.lbl.set_margin_bottom(10)
         self.lbl.set_margin_start(14)
         self.lbl.set_margin_end(14)
         self.lbl.get_style_context().add_class("bubble-text")
         box.pack_start(self.lbl, True, True, 0)
 
-        close_box = Gtk.EventBox()
-        close_lbl = Gtk.Label(label="x")
-        close_lbl.get_style_context().add_class("status-offline")
-        close_lbl.set_margin_end(10)
-        close_lbl.set_margin_bottom(4)
-        close_lbl.set_halign(Gtk.Align.END)
-        close_box.add(close_lbl)
-        close_box.connect("button-press-event", lambda *_: self.hide() or True)
-        box.pack_start(close_box, False, False, 0)
+    def _make_click_through(self, *_):
+        win = self.get_window()
+        if win is not None:
+            win.input_shape_combine_region(cairo.Region(), 0, 0)
 
     def _on_draw(self, widget, cr):
         cr.set_operator(cairo.OPERATOR_CLEAR)
