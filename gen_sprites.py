@@ -128,50 +128,132 @@ def draw_head(draw, cx, cy):
     ell(draw, cx + r + 3, cy + 15, 4, 4, GOLD)
     ell(draw, cx + r + 3, cy + 15, 2, 2, GOLD_LIGHT)
 
-def draw_face(draw, cx, cy):
-    # Eyebrows — gently arched, relaxed (not raised in shock)
-    for bx0, flip in [(cx - 15, 1), (cx + 5, -1)]:
+def draw_face(draw, cx, cy, expression="smirk"):
+    if expression == "smirk":
+        _face_smirk(draw, cx, cy)
+    elif expression == "surprised":
+        _face_surprised(draw, cx, cy)
+    elif expression == "whee":
+        _face_whee(draw, cx, cy)
+    elif expression == "sleepy":
+        _face_sleepy(draw, cx, cy)
+    elif expression == "happy":
+        _face_happy(draw, cx, cy)
+
+def _brows_normal(draw, cx, cy):
+    for bx0 in [cx - 15, cx + 5]:
         for j in range(8):
             arch = int((j - 3.5) ** 2 * 0.18)
             ell(draw, bx0 + j, cy - 10 - arch, 2, 2, BROW)
 
-    # Eyes — half-lidded, cool/relaxed (not wide-open shocked)
-    for ex in [cx - 9, cx + 9]:
-        # eye white — slightly smaller, oval not circle
-        ell(draw, ex, cy - 2, 6, 5, EYE_WHITE)
-        # iris
-        ell(draw, ex, cy - 2, 4, 4, EYE_IRIS)
-        # pupil
-        ell(draw, ex + 1, cy - 2, 2, 2, EYE_PUPIL)
-        # shine
-        ell(draw, ex - 1, cy - 4, 1, 1, (255, 255, 255, 220))
-        # upper eyelid — covers top third of eye = relaxed/half-lidded look
-        draw.line([(ex - 6, cy - 5), (ex + 6, cy - 5)], fill=BROW, width=2)
-        draw.line([(ex - 5, cy - 6), (ex + 5, cy - 6)], fill=BROW, width=1)
+def _brows_raised(draw, cx, cy, extra=6):
+    for bx0 in [cx - 15, cx + 5]:
+        for j in range(8):
+            arch = int((j - 3.5) ** 2 * 0.22)
+            ell(draw, bx0 + j, cy - 14 - arch - extra + j // 3, 2, 2, BROW)
 
-    # Nose — small rounded bulb
+def _nose(draw, cx, cy):
     ell(draw, cx + 3, cy + 5, 5, 4, BODY_LIGHT)
     ell(draw, cx + 3, cy + 5, 3, 3, BODY_MID)
 
-    # Friendly closed smirk — no gaping mouth
-    sy = cy + 11
-    # lower lip curve
-    for dx in range(-8, 9):
-        curve = int(dx * dx * 0.055)
-        draw.point((cx + dx, sy + 3 + curve), fill=LIP)
-    # upper lip line — straight with slight upturn at corners
-    for dx in range(-8, 9):
-        upturn = int(abs(dx) * 0.3)
-        draw.point((cx + dx, sy - upturn), fill=LIP)
-    # small visible teeth strip — understated
-    ell(draw, cx, sy + 1, 6, 3, TEETH)
-
-    # Goatee
+def _goatee(draw, cx, sy):
     for dy in range(6):
         bw = max(0, 3 - abs(dy - 2))
         for dx in range(-bw, bw + 1):
-            a = max(60, BEARD[3] - dy * 25)
-            draw.point((cx + dx, sy + 5 + dy), fill=(*BEARD[:3], a))
+            draw.point((cx + dx, sy + dy), fill=(*BEARD[:3], max(60, BEARD[3] - dy * 25)))
+
+def _face_smirk(draw, cx, cy):
+    """Cool relaxed smirk — default float expression."""
+    _brows_normal(draw, cx, cy)
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy - 2, 6, 5, EYE_WHITE)
+        ell(draw, ex, cy - 2, 4, 4, EYE_IRIS)
+        ell(draw, ex + 1, cy - 2, 2, 2, EYE_PUPIL)
+        ell(draw, ex - 1, cy - 4, 1, 1, (255, 255, 255, 220))
+        draw.line([(ex - 6, cy - 5), (ex + 6, cy - 5)], fill=BROW, width=2)
+        draw.line([(ex - 5, cy - 6), (ex + 5, cy - 6)], fill=BROW, width=1)
+    _nose(draw, cx, cy)
+    sy = cy + 11
+    for dx in range(-8, 9):
+        draw.point((cx + dx, sy + 3 + int(dx * dx * 0.055)), fill=LIP)
+    for dx in range(-8, 9):
+        draw.point((cx + dx, sy - int(abs(dx) * 0.3)), fill=LIP)
+    ell(draw, cx, sy + 1, 6, 3, TEETH)
+    _goatee(draw, cx, sy + 5)
+
+def _face_surprised(draw, cx, cy):
+    """YOOOO face — used when dragged. Wide eyes, raised brows, open mouth."""
+    _brows_raised(draw, cx, cy, extra=4)
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy - 2, 7, 7, EYE_WHITE)
+        ell(draw, ex, cy - 2, 5, 5, EYE_IRIS)
+        ell(draw, ex + 1, cy - 2, 3, 3, EYE_PUPIL)
+        ell(draw, ex - 2, cy - 5, 2, 2, (255, 255, 255, 220))
+    _nose(draw, cx, cy)
+    # wide open O-shaped mouth
+    sy = cy + 12
+    ell(draw, cx, sy + 3, 9, 7, LIP)
+    ell(draw, cx, sy + 3, 7, 5, TEETH)
+    ell(draw, cx, sy + 5, 5, 4, (220, 100, 120, 255))   # tongue/throat
+    _goatee(draw, cx, sy + 11)
+    # exclamation marks
+    for ox in [-18, 18]:
+        draw.line([(cx + ox, cy - 12), (cx + ox, cy - 6)], fill=GOLD, width=2)
+        ell(draw, cx + ox, cy - 4, 2, 2, GOLD)
+
+def _face_whee(draw, cx, cy):
+    """WHEEE — used when thrown. Squinted XD eyes, huge grin."""
+    _brows_normal(draw, cx, cy)
+    # squinted happy eyes — just arcs, no whites
+    for ex in [cx - 9, cx + 9]:
+        draw.arc([ex - 6, cy - 7, ex + 6, cy + 1], start=200, end=340, fill=BROW, width=3)
+    _nose(draw, cx, cy)
+    # huge open grin
+    sy = cy + 10
+    for dx in range(-11, 12):
+        curve = int(dx * dx * 0.04)
+        draw.point((cx + dx, sy + 6 + curve), fill=LIP)
+    draw.line([(cx - 11, sy), (cx + 11, sy)], fill=LIP, width=2)
+    ell(draw, cx, sy + 3, 10, 4, TEETH)
+    for tx in [-5, 0, 5]:
+        draw.line([(cx + tx, sy), (cx + tx, sy + 6)], fill=(*LIP[:3], 60), width=1)
+    _goatee(draw, cx, sy + 8)
+
+def _face_sleepy(draw, cx, cy):
+    """Sleeping — closed eyes, tiny smile, ZZZs."""
+    _brows_normal(draw, cx, cy)
+    # closed eyes — just a gentle curve
+    for ex in [cx - 9, cx + 9]:
+        draw.arc([ex - 6, cy - 6, ex + 6, cy + 2], start=190, end=350, fill=BROW, width=3)
+    _nose(draw, cx, cy)
+    # small peaceful smile
+    sy = cy + 12
+    for dx in range(-6, 7):
+        draw.point((cx + dx, sy + int(dx * dx * 0.07)), fill=LIP)
+    # ZZZs floating near hat (drawn as pixel staircase z-shapes)
+    for i, (ox, oy) in enumerate([(14, -18), (20, -26), (26, -36)]):
+        size = 3 + i
+        zx, zy = cx + ox, cy + oy
+        draw.line([(zx, zy), (zx + size, zy)], fill=(*GOLD[:3], 200), width=1)
+        draw.line([(zx + size, zy), (zx, zy + size)], fill=(*GOLD[:3], 200), width=1)
+        draw.line([(zx, zy + size), (zx + size, zy + size)], fill=(*GOLD[:3], 200), width=1)
+    _goatee(draw, cx, sy + 4)
+
+def _face_happy(draw, cx, cy):
+    """Happy open — used while drifting/walking."""
+    _brows_normal(draw, cx, cy)
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy - 2, 6, 6, EYE_WHITE)
+        ell(draw, ex, cy - 2, 4, 4, EYE_IRIS)
+        ell(draw, ex + 1, cy - 2, 2, 2, EYE_PUPIL)
+        ell(draw, ex - 1, cy - 5, 2, 2, (255, 255, 255, 210))
+    _nose(draw, cx, cy)
+    sy = cy + 11
+    for dx in range(-9, 10):
+        draw.point((cx + dx, sy + 4 + int(dx * dx * 0.048)), fill=LIP)
+    draw.line([(cx - 9, sy - 1), (cx + 9, sy - 1)], fill=LIP, width=2)
+    ell(draw, cx, sy + 2, 8, 4, TEETH)
+    _goatee(draw, cx, sy + 6)
 
 # ── sash ──────────────────────────────────────────────────────────────────────
 
@@ -288,17 +370,30 @@ def make_frame(mode, frame_idx, total_frames):
         return img
 
     if mode == "float":
-        head_cy = int(62 + bob)
-        arm_fn  = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
-        tail_a  = 9
+        head_cy    = int(62 + bob)
+        arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a     = 9
+        expression = "smirk"
     elif mode == "walk":
-        head_cy = int(60 + bob * 0.5)
-        arm_fn  = lambda d, c, cy: draw_arms_drifting(d, c, cy, t)
-        tail_a  = 14
+        head_cy    = int(60 + bob * 0.5)
+        arm_fn     = lambda d, c, cy: draw_arms_drifting(d, c, cy, t)
+        tail_a     = 14
+        expression = "happy"
+    elif mode == "whee":
+        head_cy    = int(60 + bob * 0.4)
+        arm_fn     = lambda d, c, cy: draw_arms_drifting(d, c, cy, t)
+        tail_a     = 18
+        expression = "whee"
+    elif mode == "sleep":
+        head_cy    = int(64 + bob * 0.3)
+        arm_fn     = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a     = 5
+        expression = "sleepy"
     else:  # grab
-        head_cy = int(62 + bob * 0.3)
-        arm_fn  = lambda d, c, cy: draw_arms_grab(d, c, cy)
-        tail_a  = 7
+        head_cy    = int(62 + bob * 0.3)
+        arm_fn     = lambda d, c, cy: draw_arms_grab(d, c, cy)
+        tail_a     = 7
+        expression = "surprised"
 
     chest_y  = head_cy + 26
     waist_y  = chest_y + 28
@@ -312,7 +407,7 @@ def make_frame(mode, frame_idx, total_frames):
     draw_torso(draw, cx, chest_y)
     arm_fn(draw, cx, chest_y)
     draw_head(draw, cx, head_cy)
-    draw_face(draw, cx, head_cy)
+    draw_face(draw, cx, head_cy, expression)
     draw_hat(draw, cx, head_top, t)
 
     soft = img.filter(ImageFilter.GaussianBlur(radius=0.7))
@@ -321,7 +416,7 @@ def make_frame(mode, frame_idx, total_frames):
 
 # ── generate ──────────────────────────────────────────────────────────────────
 
-SETS = {"float": 6, "walk": 6, "poof_expand": 4, "poof_shrink": 4}
+SETS = {"float": 6, "walk": 6, "whee": 6, "sleep": 4, "poof_expand": 4, "poof_shrink": 4}
 
 # grab — single tilted frame
 grab = make_frame("grab", 0, 1)

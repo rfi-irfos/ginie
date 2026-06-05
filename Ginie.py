@@ -929,6 +929,9 @@ class PetWindow(Gtk.Window):
         self.fs_float_l     = load_set("float",        flip=True)
         self.fs_walk_r      = load_set("walk",         flip=False)
         self.fs_walk_l      = load_set("walk",         flip=True)
+        self.fs_whee_r      = load_set("whee",         flip=False)
+        self.fs_whee_l      = load_set("whee",         flip=True)
+        self.fs_sleep       = load_set("sleep",        flip=False)
         self.fs_poof_expand = load_set("poof_expand",  flip=False)
         self.fs_poof_shrink = load_set("poof_shrink",  flip=False)
         self.fs_grab        = load_set("grab",         flip=False)
@@ -1165,7 +1168,7 @@ class PetWindow(Gtk.Window):
 
         elif self._state == THROWN:
             self._anim_ms  = ANIM_FLOAT_MS
-            fs = self.fs_float_r if self._throw_vx >= 0 else self.fs_float_l
+            fs = self.fs_whee_r if self._throw_vx >= 0 else self.fs_whee_l
             if self.frame_set is not fs:
                 self.frame_set = fs
 
@@ -1186,10 +1189,17 @@ class PetWindow(Gtk.Window):
             if self._throw_speed < 25:
                 self._start_float()
 
-        # inactivity: if parked as floating with no velocity, nudge after timeout
+        # inactivity: if parked as floating with no velocity, nudge or sleep
         user_away = (now - self._last_user_action) > INACTIVITY_WANDER_S
         if user_away and self._state == FLOATING and self._vx == 0 and self._vy == 0:
-            self._pick_next_move(now)
+            asleep = (now - self._last_user_action) > 60
+            if asleep:
+                fs = self.fs_sleep
+                if self.frame_set is not fs:
+                    self.frame_set = fs
+                    self.frame_idx = 0
+            else:
+                self._pick_next_move(now)
 
     def _clamp(self, nx, ny):
         m = self._margin
@@ -1264,6 +1274,9 @@ class PetWindow(Gtk.Window):
         self._press_x = ev.x_root
         self._press_y = ev.y_root
         self._did_drag = False
+        # wake from sleep
+        if self.frame_set is self.fs_sleep:
+            self._start_float()
         if ev.button == 3:
             self._show_menu(ev)
 
