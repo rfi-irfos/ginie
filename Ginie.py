@@ -802,13 +802,9 @@ class TrailOverlay(Gtk.Window):
         self.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
         self.set_app_paintable(True)
         screen = Gdk.Screen.get_default()
-        display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
-        if monitor:
-            geo = monitor.get_geometry()
-            sw, sh = geo.width, geo.height
-        else:
-            sw, sh = screen.get_width(), screen.get_height()
+        # span entire virtual desktop so footprints land correctly on any monitor
+        sw = screen.get_width()
+        sh = screen.get_height()
         self.set_default_size(sw, sh)
         self.move(0, 0)
         self._composited = screen.is_composited()
@@ -1578,7 +1574,7 @@ class BubbleWindow(Gtk.Window):
         close_lbl.set_margin_bottom(4)
         close_lbl.set_halign(Gtk.Align.END)
         close_box.add(close_lbl)
-        close_box.connect("button-press-event", lambda *_: (self.hide(), self.pet._open_chat()))
+        close_box.connect("button-press-event", lambda *_: self.hide() or True)
         box.pack_start(close_box, False, False, 0)
 
     def _on_draw(self, widget, cr):
@@ -1624,9 +1620,14 @@ class BubbleWindow(Gtk.Window):
         h = self.get_allocated_height()
         w = self.get_allocated_width()
         if h < 20:
-            GLib.idle_add(self._do_reposition, px, py)
+            GLib.idle_add(self._do_reposition,
+                          int(self.pet.x), int(self.pet.y))
             return False
         w = max(w, 180)
+
+        # always use freshest position — passed-in px/py may be stale
+        px = int(self.pet.x)
+        py = int(self.pet.y)
 
         sw = Gdk.Screen.get_default().get_width()
 
@@ -1636,7 +1637,8 @@ class BubbleWindow(Gtk.Window):
 
         genie_cx = px + disp_w // 2
         bx = genie_cx - w // 2
-        by = py - h - 6
+        # hat tip is ~8% inside the window top; aim bubble tail at hat, not air
+        by = py - h + int(disp_h * 0.08)
 
         bx = max(6, min(bx, sw - w - 6))
 

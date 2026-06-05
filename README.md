@@ -21,32 +21,10 @@ plug in usb  ->  bash START_ASSISTANT.sh  ->  working AI agent
 If you just want to build and run Ginie directly on your Linux machine:
 
 ```bash
-# 1. install system deps (Ubuntu/Debian)
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0
-pip install pillow
-
-# 2. clone
-git clone https://github.com/rfi-irfos/ginie ~/ginie
-cd ~/ginie
-
-# 3. generate sprites
-python3 gen_sprites.py
-
-# 4. wire the genie command (one time)
-mkdir -p ~/.local/bin
-echo '#!/usr/bin/env bash' > ~/.local/bin/ginie
-echo 'exec python3 '"$HOME"'/ginie/Ginie.py "$@"' >> ~/.local/bin/ginie
-chmod +x ~/.local/bin/ginie
-
-# make sure ~/.local/bin is in PATH (add to ~/.bashrc if missing)
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-
-# 5. launch
-ginie
+sudo apt install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 && pip install pillow && git clone https://github.com/rfi-irfos/ginie ~/ginie && python3 ~/ginie/gen_sprites.py && mkdir -p ~/.local/bin && printf '#!/usr/bin/env bash\nexec python3 ~/ginie/Ginie.py "$@"\n' > ~/.local/bin/ginie && chmod +x ~/.local/bin/ginie && grep -q 'local/bin' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && echo "done — open a new terminal and type: ginie"
 ```
 
-After step 4, open any new terminal and just type `ginie`.
+Open a new terminal after running that, then just type `ginie`.
 
 > Ollama + model weights are optional for the desktop pet — the sprite, animations,
 > and right-click menu all work without them. Chat will show "offline" until Ollama

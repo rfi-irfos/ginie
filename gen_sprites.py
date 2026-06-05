@@ -425,8 +425,8 @@ def draw_arms_drifting(draw, cx, chest_y, t):
         fy = ey + 14
         thick_line(draw, ex, ey, fx, fy, BODY_MID, w=8)
         ell(draw, fx, fy + 2, 7, 6, BODY_LIGHT)
-        ell(draw, sx, ay, 7, 5, GOLD)
-        ell(draw, sx, ay, 5, 3, GOLD_LIGHT)
+        ell(draw, fx, fy + 4, 7, 5, GOLD)             # wrist cuff
+        ell(draw, fx, fy + 4, 5, 3, GOLD_LIGHT)
 
 def draw_arms_scared(draw, cx, chest_y, t):
     """Both arms flung UP in panic — thrown above head level."""
@@ -443,8 +443,6 @@ def draw_arms_scared(draw, cx, chest_y, t):
         fy = ey - 24               # fists end up well above head
         thick_line(draw, ex, ey, fx, fy, BODY_LIGHT, w=9)
         ell(draw, fx, fy - 4, 7, 6, BODY_BRIGHT)     # fist
-        ell(draw, sx, ay - 2,  9, 7, GOLD)            # shoulder cuff
-        ell(draw, sx, ay - 2,  6, 4, GOLD_LIGHT)
         ell(draw, fx, fy + 1,  8, 6, GOLD)            # wrist cuff
         ell(draw, fx, fy + 1,  5, 3, GOLD_LIGHT)
 
