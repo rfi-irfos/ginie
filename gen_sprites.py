@@ -127,7 +127,7 @@ def draw_smoke_tail(draw, cx, waist_y, t, amplitude=9):
     n = 16
     for i in range(n - 1, -1, -1):          # draw tip first, base overlaps
         frac  = i / (n - 1)                  # 0 = waist, 1 = tip
-        seg_y = waist_y + int(frac * 54)
+        seg_y = waist_y + int(frac * 44)
         wave  = math.sin(frac * math.pi * 2.8 + t * 2 * math.pi)
         seg_x = cx + int(wave * amplitude * frac)
 
@@ -149,7 +149,7 @@ def draw_hat(draw, cx, head_top, t):
     flop_x = int(math.sin(phase) * 6) + 9   # droop right by default, sway ±6
     flop_y = int(abs(math.sin(phase)) * 3)   # tip dips a little at extremes
     tip_x  = cx + flop_x
-    tip_y  = head_top - 40 + flop_y
+    tip_y  = head_top - 32 + flop_y
     base_y = head_top + 3
     bw     = 17
 
@@ -197,6 +197,8 @@ def draw_face(draw, cx, cy, expression="bruh"):
         _face_sleepy(draw, cx, cy)
     elif expression == "happy":
         _face_happy(draw, cx, cy)
+    elif expression == "scared":
+        _face_scared(draw, cx, cy)
 
 def _brows_normal(draw, cx, cy):
     for bx0 in [cx - 15, cx + 5]:
@@ -211,14 +213,16 @@ def _brows_raised(draw, cx, cy, extra=6):
             ell(draw, bx0 + j, cy - 14 - arch - extra + j // 3, 2, 2, BROW)
 
 def _nose(draw, cx, cy):
-    ell(draw, cx + 3, cy + 5, 5, 4, BODY_LIGHT)
-    ell(draw, cx + 3, cy + 5, 3, 3, BODY_MID)
+    ell(draw, cx + 1, cy + 7, 2, 2, BODY_SHADOW)
+    ell(draw, cx + 5, cy + 7, 2, 2, BODY_SHADOW)
 
 def _goatee(draw, cx, sy):
-    for dy in range(6):
-        bw = max(0, 3 - abs(dy - 2))
+    """Pointed goatee — narrows to a tip."""
+    for dy in range(9):
+        bw = max(0, 4 - int(dy * 0.6))
+        a  = max(30, BEARD[3] - dy * 18)
         for dx in range(-bw, bw + 1):
-            draw.point((cx + dx, sy + dy), fill=(*BEARD[:3], max(60, BEARD[3] - dy * 25)))
+            draw.point((cx + dx, sy + dy), fill=(*BEARD[:3], a))
 
 def _face_bruh(draw, cx, cy):
     """Bruh — unimpressed, heavy lids, flat mouth."""
@@ -335,6 +339,20 @@ def _face_happy(draw, cx, cy):
     ell(draw, cx, sy + 2, 8, 4, TEETH)
     _goatee(draw, cx, sy + 6)
 
+def _face_scared(draw, cx, cy):
+    """Full panic — wide white eyes, open O mouth, brows shot up."""
+    _brows_raised(draw, cx, cy, extra=5)
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy,      8, 8, EYE_WHITE)
+        ell(draw, ex, cy + 1,  5, 5, EYE_IRIS)
+        ell(draw, ex + 1, cy,  3, 3, EYE_PUPIL)
+        ell(draw, ex - 2, cy - 5, 2, 2, (255, 255, 255, 220))
+    _nose(draw, cx, cy)
+    sy = cy + 10
+    ell(draw, cx + 2, sy + 3, 9, 8, LIP)               # O-mouth outline
+    ell(draw, cx + 2, sy + 3, 6, 5, (20, 12, 40, 255)) # dark interior
+    _goatee(draw, cx, sy + 12)
+
 # ── sash ──────────────────────────────────────────────────────────────────────
 
 def draw_sash(draw, cx, waist_y):
@@ -352,13 +370,23 @@ def draw_sash(draw, cx, waist_y):
 # ── torso ─────────────────────────────────────────────────────────────────────
 
 def draw_torso(draw, cx, chest_y):
+    # pecs — shadow + base + highlight + specular
     ell(draw, cx + 3, chest_y + 2, 26, 18, BODY_SHADOW)
     ell(draw, cx,     chest_y,     24, 17, BODY_MID)
-    ell(draw, cx - 8, chest_y - 5, 12,  9, BODY_LIGHT)
-    ell(draw, cx - 5, chest_y - 9,  6,  5, BODY_BRIGHT)
-    belly_y = chest_y + 20
-    ell(draw, cx + 2, belly_y + 1, 18, 14, BODY_SHADOW)
-    ell(draw, cx,     belly_y,     17, 13, BODY_MID)
+    # left pec
+    ell(draw, cx - 9, chest_y - 2, 11, 9,  BODY_LIGHT)
+    ell(draw, cx - 6, chest_y - 7,  6, 5,  BODY_BRIGHT)
+    # right pec shadow (depth)
+    ell(draw, cx + 9, chest_y - 1, 10, 8,  (*BODY_SHADOW[:3], 140))
+    # pec split line
+    draw.line([(cx, chest_y - 14), (cx, chest_y + 6)],
+              fill=(*BODY_SHADOW[:3], 100), width=1)
+    # rim light — bright edge on right side
+    for oy in range(-12, 14, 3):
+        ell(draw, cx + 24, chest_y + oy, 3, 3, (*BODY_LIGHT[:3], 90))
+    belly_y = chest_y + 18
+    ell(draw, cx + 2, belly_y + 1, 17, 13, BODY_SHADOW)
+    ell(draw, cx,     belly_y,     16, 12, BODY_MID)
     ell(draw, cx - 5, belly_y - 3,  8,  7, BODY_LIGHT)
 
 # ── arms ──────────────────────────────────────────────────────────────────────
@@ -368,19 +396,21 @@ def draw_arms_crossed(draw, cx, chest_y, t):
     bob = int(math.sin(t * 2 * math.pi) * 1)
     ay  = chest_y + 4 + bob
 
-    # Right arm (underneath) — goes left across chest
-    thick_line(draw, cx + 24, ay - 2, cx + 10, ay + 6,  BODY_MID,   w=9)
-    thick_line(draw, cx + 10, ay + 6, cx - 12, ay + 9,  BODY_MID,   w=8)
-    ell(draw, cx - 14, ay + 10, 8, 7, BODY_LIGHT)
-    ell(draw, cx + 20, ay - 1,  7, 5, GOLD)
-    ell(draw, cx + 20, ay - 1,  5, 3, GOLD_LIGHT)
+    # Right arm (underneath) — darker, shoulder left toward body
+    ell(draw, cx + 22, ay - 2, 9, 7, BODY_SHADOW)       # shoulder
+    thick_line(draw, cx + 22, ay - 1, cx + 8,  ay + 6,  BODY_SHADOW, w=10)
+    thick_line(draw, cx + 8,  ay + 6, cx - 13, ay + 9,  BODY_MID,    w=9)
+    ell(draw, cx - 15, ay + 10, 7, 6, BODY_LIGHT)        # fist
+    ell(draw, cx - 13, ay + 8,  9, 6, GOLD)              # cuff at wrist
+    ell(draw, cx - 12, ay + 7,  6, 4, GOLD_LIGHT)
 
-    # Left arm (on top) — goes right across chest
-    thick_line(draw, cx - 24, ay + 2, cx - 10, ay + 8,  BODY_LIGHT, w=9)
-    thick_line(draw, cx - 10, ay + 8, cx + 12, ay + 9,  BODY_MID,   w=8)
-    ell(draw, cx + 14, ay + 10, 8, 7, BODY_LIGHT)
-    ell(draw, cx - 20, ay + 2,  7, 5, GOLD)
-    ell(draw, cx - 20, ay + 2,  5, 3, GOLD_LIGHT)
+    # Left arm (on top) — lighter, goes right
+    ell(draw, cx - 22, ay + 2, 9, 7, BODY_MID)           # shoulder
+    thick_line(draw, cx - 22, ay + 2, cx - 8,  ay + 8,  BODY_LIGHT, w=10)
+    thick_line(draw, cx - 8,  ay + 8, cx + 13, ay + 9,  BODY_MID,   w=9)
+    ell(draw, cx + 15, ay + 10, 7, 6, BODY_BRIGHT)       # fist
+    ell(draw, cx + 13, ay + 8,  9, 6, GOLD)              # cuff at wrist
+    ell(draw, cx + 12, ay + 7,  6, 4, GOLD_LIGHT)
 
 def draw_arms_drifting(draw, cx, chest_y, t):
     """Arms swaying — for drift/walk frames."""
@@ -397,6 +427,26 @@ def draw_arms_drifting(draw, cx, chest_y, t):
         ell(draw, fx, fy + 2, 7, 6, BODY_LIGHT)
         ell(draw, sx, ay, 7, 5, GOLD)
         ell(draw, sx, ay, 5, 3, GOLD_LIGHT)
+
+def draw_arms_scared(draw, cx, chest_y, t):
+    """Both arms flung up in panic — fast trembling."""
+    shake = int(math.sin(t * 8 * math.pi) * 2)
+    ay    = chest_y - 2 + shake
+    for sign in [-1, 1]:
+        sx = cx + sign * 22
+        # upper arm — outward and up
+        ex = cx + sign * 32
+        ey = ay - 18
+        thick_line(draw, sx, ay, ex, ey, BODY_MID,   w=10)
+        # forearm — continues up, slight inward curl
+        fx = cx + sign * 28
+        fy = ey - 15
+        thick_line(draw, ex, ey, fx, fy, BODY_LIGHT, w=9)
+        ell(draw, fx, fy - 2, 7, 6, BODY_BRIGHT)    # fist up in air
+        ell(draw, sx, ay,     9, 7, GOLD)             # cuff at shoulder
+        ell(draw, sx, ay,     6, 4, GOLD_LIGHT)
+        ell(draw, fx - sign, fy + 2, 8, 6, GOLD)     # cuff at wrist
+        ell(draw, fx - sign, fy + 2, 5, 3, GOLD_LIGHT)
 
 def draw_arms_grab(draw, cx, chest_y):
     """Arms up — surprised/grabbed pose."""
@@ -477,14 +527,14 @@ def make_frame(mode, frame_idx, total_frames):
         head_cy    = int(60 + bob * 0.5)
         tail_a     = 14
         expression = None
-    else:  # grab
+    else:  # grab / drag
         head_cy    = int(62 + bob * 0.3)
-        arm_fn     = lambda d, c, cy: draw_arms_grab(d, c, cy)
+        arm_fn     = lambda d, c, cy: draw_arms_scared(d, c, cy, t)
         tail_a     = 7
-        expression = "surprised"
+        expression = "scared"
 
-    chest_y  = head_cy + 26
-    waist_y  = chest_y + 28
+    chest_y  = head_cy + 22   # was 26 — tighten neck
+    waist_y  = chest_y + 18   # was 28 — keeps tail inside canvas
     head_top = head_cy - 21
 
     img  = soft_glow(img, cx, chest_y, 52, GLOW_COL)
