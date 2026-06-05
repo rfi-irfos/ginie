@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
-Flaschengeist sprite generator for Ginie.
-Design reference: Aladdin-style blue genie — tall pointed hat, gold headband+gem,
-gold earring, muscular blue torso, gold necklace+gem, orange sash, baggy blue pants,
-bare blue feet.
-Run: python3 gen_sprites.py
-Outputs to usb_assistant/frames/
+Ginie sprite generator — proper Aladdin-style blue genie.
+Big round Disney head, expressive face, barrel chest, crossed arms,
+wispy animated smoke tail (no legs). Run: python3 gen_sprites.py
 """
 import os, math
 from PIL import Image, ImageDraw, ImageFilter
@@ -14,330 +11,315 @@ HERE   = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.path.join(HERE, "usb_assistant", "frames")
 os.makedirs(OUTDIR, exist_ok=True)
 
-W, H = 120, 160   # canvas — taller to fit hat + pants
+W, H = 120, 160
 
-# ── palette (matches reference image) ────────────────────────────────────────
-SKIN_DARK   = ( 10,  60, 160, 255)   # deep blue shadow
-SKIN_MID    = ( 20, 100, 200, 255)   # main body blue
-SKIN_LIGHT  = ( 55, 145, 230, 255)   # highlight
-SKIN_BRIGHT = ( 90, 170, 245, 255)   # specular
+# ── palette ───────────────────────────────────────────────────────────────────
+BODY_SHADOW  = ( 22,  65, 145, 255)
+BODY_MID     = ( 52, 120, 205, 255)
+BODY_LIGHT   = ( 92, 162, 242, 255)
+BODY_BRIGHT  = (150, 205, 255, 255)
 
-HAT_DARK    = ( 10,  20, 100, 255)   # dark navy hat shadow
-HAT_MID     = ( 25,  45, 155, 255)   # main hat blue
-HAT_BAND    = (200, 155,  10, 255)   # gold headband
-HAT_GEM     = (200,  30,  30, 255)   # red gem in band
-EARRING     = (220, 175,  20, 255)   # gold earring
+HAT_SHADOW   = ( 14,  22, 105, 255)
+HAT_MID      = ( 32,  50, 150, 255)
+HAT_LIGHT    = ( 55,  82, 188, 255)
+HAT_BAND     = (255, 210,   0, 255)
+HAT_GEM      = (215,  25,  25, 255)
 
-NECKLACE    = (200, 155,  10, 255)   # gold necklace
-NECK_GEM    = (180,  20,  20, 255)   # red pendant gem
+GOLD         = (215, 168,  12, 255)
+GOLD_LIGHT   = (255, 225,  85, 255)
 
-SASH        = (210, 120,  15, 255)   # orange sash
-SASH_DARK   = (160,  80,   5, 255)   # sash shadow
-SASH_LAYER  = (220,  80,  10, 200)   # layered sash drape
+EYE_WHITE    = (230, 248, 255, 255)
+EYE_IRIS     = ( 32,  70, 182, 255)
+EYE_PUPIL    = (  8,  16,  60, 255)
+BROW         = ( 16,  38, 122, 255)
 
-PANTS       = ( 15,  40, 130, 255)   # dark blue baggy pants
-PANTS_LIGHT = ( 30,  70, 180, 255)   # pants highlight crease
+TEETH        = (242, 252, 255, 255)
+LIP          = ( 16,  44, 128, 255)
+BEARD        = ( 28,  60, 150, 190)
 
-EYE_WHITE   = (220, 235, 255, 255)
-EYE_IRIS    = ( 20,  80, 180, 255)
-EYE_PUPIL   = (  5,  20,  60, 255)
-BROW_COL    = ( 10,  30, 100, 255)
-BEARD_COL   = ( 10,  40, 130, 220)
+SASH         = (200, 110,  10, 255)
+SASH_LIGHT   = (235, 150,  38, 255)
 
-GLOW_COL    = ( 60, 120, 220,  25)
+GLOW_COL     = ( 68, 138, 222,  18)
 
-# ── primitives ────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
-def ell(draw, cx, cy, rx, ry, fill, outline=None):
-    draw.ellipse([cx-rx, cy-ry, cx+rx, cy+ry], fill=fill, outline=outline)
+def ell(draw, cx, cy, rx, ry, fill):
+    draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=fill)
 
 def poly(draw, pts, fill):
     draw.polygon(pts, fill=fill)
 
-def soft_glow(img, cx, cy, r, color):
-    ov = Image.new("RGBA", img.size, (0,0,0,0))
-    d  = ImageDraw.Draw(ov)
-    for s in range(r, 0, -3):
-        t = s / r
-        a = int(color[3] * (1 - t) * (1 - t))
-        d.ellipse([cx-s, cy-s, cx+s, cy+s], fill=(*color[:3], a))
-    return Image.alpha_composite(img, ov)
-
-def thick_line(draw, x0, y0, x1, y1, color, w=4):
-    steps = max(abs(x1-x0), abs(y1-y0), 1)
+def thick_line(draw, x0, y0, x1, y1, color, w=5):
+    steps = max(abs(x1 - x0), abs(y1 - y0), 1)
     hw = w // 2
     for s in range(steps + 1):
         t  = s / steps
         px = int(x0 + t * (x1 - x0))
         py = int(y0 + t * (y1 - y0))
-        draw.ellipse([px-hw, py-hw, px+hw, py+hw], fill=color)
+        draw.ellipse([px - hw, py - hw, px + hw, py + hw], fill=color)
+
+def soft_glow(img, cx, cy, r, col):
+    ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d  = ImageDraw.Draw(ov)
+    for s in range(r, 0, -4):
+        frac = s / r
+        a    = int(col[3] * (1 - frac) * (1 - frac))
+        d.ellipse([cx - s, cy - s, cx + s, cy + s], fill=(*col[:3], a))
+    return Image.alpha_composite(img, ov)
+
+# ── smoke tail ────────────────────────────────────────────────────────────────
+
+def draw_smoke_tail(draw, cx, waist_y, t, amplitude=9):
+    """Wispy animated smoke tail — the key Aladdin-genie feature."""
+    n = 16
+    for i in range(n - 1, -1, -1):          # draw tip first, base overlaps
+        frac  = i / (n - 1)                  # 0 = waist, 1 = tip
+        seg_y = waist_y + int(frac * 54)
+        wave  = math.sin(frac * math.pi * 2.8 + t * 2 * math.pi)
+        seg_x = cx + int(wave * amplitude * frac)
+
+        rx = max(2, int(15 * (1 - frac * 0.68)))
+        ry = max(2, int(10 * (1 - frac * 0.68)))
+        a  = int(215 * (1 - frac * 0.92))
+
+        r = int(BODY_MID[0] * (1 - frac * 0.35) + BODY_SHADOW[0] * frac * 0.35)
+        g = int(BODY_MID[1] * (1 - frac * 0.35) + BODY_SHADOW[1] * frac * 0.35)
+        b = int(BODY_MID[2] * (1 - frac * 0.35) + BODY_SHADOW[2] * frac * 0.35)
+        draw.ellipse([seg_x - rx, seg_y - ry, seg_x + rx, seg_y + ry],
+                     fill=(r, g, b, a))
 
 # ── hat ───────────────────────────────────────────────────────────────────────
 
 def draw_hat(draw, cx, head_top, t):
-    # tall pointed hat tilts slightly with animation
-    tilt = int(math.sin(t * 2 * math.pi) * 3)
-    tip_x = cx + tilt + 4
-    tip_y = head_top - 42
+    tilt   = int(math.sin(t * 2 * math.pi) * 2)
+    tip_x  = cx + tilt
+    tip_y  = head_top - 34
+    base_y = head_top + 4
+    bw     = 17
 
-    # hat body: filled polygon (dark back, mid front)
-    base_left  = cx - 14
-    base_right = cx + 16
-    base_y     = head_top + 2
+    poly(draw, [(tip_x - 2, tip_y), (cx - bw, base_y), (cx,      base_y)], HAT_SHADOW)
+    poly(draw, [(tip_x + 1, tip_y), (cx,      base_y), (cx + bw, base_y)], HAT_MID)
+    poly(draw, [(tip_x,     tip_y + 3), (cx - 4, base_y), (cx + 4, base_y)], HAT_LIGHT)
 
-    # shadow side
-    poly(draw, [(tip_x-3, tip_y), (base_left, base_y), (cx+2, base_y)], HAT_DARK)
-    # highlight side
-    poly(draw, [(tip_x+2, tip_y), (cx+2, base_y), (base_right, base_y)], HAT_MID)
+    draw.rectangle([cx - bw - 1, base_y - 5, cx + bw + 1, base_y + 5], fill=HAT_BAND)
+    ell(draw, cx, base_y, 6, 6, HAT_GEM)
+    ell(draw, cx - 1, base_y - 1, 2, 2, (255, 115, 115, 255))
 
-    # gold band across base
-    draw.rectangle([base_left-1, base_y-4, base_right+1, base_y+4], fill=HAT_BAND)
-
-    # red gem in band centre
-    ell(draw, cx+1, base_y, 5, 5, HAT_GEM)
-    ell(draw, cx,   base_y-1, 2, 2, (240, 120, 120, 255))   # gem highlight
-
-    # gold trim at very tip
-    ell(draw, tip_x, tip_y, 3, 3, HAT_BAND)
-
-    # hanging gold earring (right side of head)
-    ear_x = cx + 14
-    ear_y = head_top + 12
-    draw.line([(ear_x, ear_y), (ear_x+1, ear_y+9)], fill=EARRING, width=2)
-    ell(draw, ear_x+1, ear_y+12, 4, 4, EARRING)
-    ell(draw, ear_x+1, ear_y+12, 2, 2, (255, 230, 100, 255))
+    ell(draw, tip_x, tip_y, 3, 3, GOLD)
+    for ang in [0, 90, 180, 270]:
+        rad = math.radians(ang)
+        draw.point((tip_x + int(math.cos(rad) * 4),
+                    tip_y + int(math.sin(rad) * 4)), fill=GOLD_LIGHT)
 
 # ── head + face ───────────────────────────────────────────────────────────────
 
-def draw_head(draw, cx, cy, t):
-    # head shape: slightly wider at cheeks
-    ell(draw, cx, cy,   17, 18, SKIN_DARK)   # shadow ring
-    ell(draw, cx, cy-1, 15, 16, SKIN_MID)
-    ell(draw, cx-4, cy-4, 7, 7, SKIN_LIGHT)  # highlight
+def draw_head(draw, cx, cy):
+    r = 21
+    ell(draw, cx + 2, cy + 2, r, r, BODY_SHADOW)
+    ell(draw, cx,     cy,     r, r, BODY_MID)
+    ell(draw, cx - 8, cy - 2, 11, 9, BODY_LIGHT)
+    ell(draw, cx - 4, cy - 10, 6, 5, BODY_BRIGHT)
 
-    # eyebrows — thick, slightly arched
-    for side, ex in [(-1, cx-6), (1, cx+5)]:
-        for dx in range(6):
-            by = cy - 9 - int(abs(dx - 2.5) * 0.6)
-            draw.point((ex + dx, by), fill=BROW_COL)
-        draw.point((ex + 1, cy-10), fill=BROW_COL)
+    # Right ear + earring
+    ell(draw, cx + r - 2, cy + 3, 5, 7, BODY_MID)
+    ell(draw, cx + r - 1, cy + 3, 3, 5, BODY_LIGHT)
+    draw.line([(cx + r + 2, cy + 6), (cx + r + 3, cy + 13)], fill=GOLD, width=2)
+    ell(draw, cx + r + 3, cy + 15, 4, 4, GOLD)
+    ell(draw, cx + r + 3, cy + 15, 2, 2, GOLD_LIGHT)
 
-    # eyes
-    for ex in [cx-6, cx+6]:
-        ell(draw, ex, cy-4, 5, 4, EYE_WHITE)
-        ell(draw, ex, cy-4, 3, 3, EYE_IRIS)
-        ell(draw, ex+1, cy-4, 2, 2, EYE_PUPIL)
-        draw.point((ex-1, cy-6), fill=(255, 255, 255, 200))  # specular
+def draw_face(draw, cx, cy):
+    # Eyebrows — thick arched
+    for bx0 in [cx - 16, cx + 4]:
+        for j in range(10):
+            arch = int((j - 4.5) ** 2 * 0.22)
+            ell(draw, bx0 + j, cy - 11 - arch, 2, 2, BROW)
 
-    # smile — wider, slightly visible teeth
-    smile_y = cy + 6
-    for dx in range(-5, 6):
-        sy = smile_y + int(abs(dx) * 0.5)
-        draw.point((cx + dx, sy), fill=SKIN_DARK)
+    # Big Disney eyes
+    for ex in [cx - 9, cx + 9]:
+        ell(draw, ex, cy - 3, 7, 7, EYE_WHITE)
+        ell(draw, ex, cy - 3, 5, 5, EYE_IRIS)
+        ell(draw, ex + 1, cy - 3, 3, 3, EYE_PUPIL)
+        ell(draw, ex - 2, cy - 6, 2, 2, (255, 255, 255, 210))
+        ell(draw, ex + 2, cy - 1, 1, 1, (255, 255, 255, 150))
+        draw.line([(ex - 5, cy + 3), (ex + 5, cy + 3)], fill=BROW, width=1)
 
-    # small goatee beard
-    for dy in range(5):
-        bw = max(1, 4 - dy)
-        for dx in range(-bw, bw+1):
-            draw.point((cx + dx, cy + 9 + dy), fill=BEARD_COL)
+    # Nose bulb
+    ell(draw, cx + 4, cy + 5, 5, 4, BODY_LIGHT)
+    ell(draw, cx + 4, cy + 5, 3, 3, BODY_MID)
+    draw.point((cx + 3, cy + 4), fill=BODY_BRIGHT)
+
+    # Wide smile with teeth
+    sy = cy + 12
+    for dx in range(-10, 11):
+        draw.point((cx + dx, sy + 5 + int(dx * dx * 0.045)), fill=LIP)
+    draw.line([(cx - 10, sy - 2), (cx + 10, sy - 2)], fill=LIP, width=2)
+    ell(draw, cx, sy + 1, 9, 4, TEETH)
+    for tx in [cx - 3, cx + 3]:
+        draw.line([(tx, sy - 1), (tx, sy + 4)], fill=(*LIP[:3], 70), width=1)
+
+    # Goatee
+    for dy in range(7):
+        bw = max(0, 4 - abs(dy - 2))
+        for dx in range(-bw, bw + 1):
+            a = max(70, BEARD[3] - dy * 22)
+            draw.point((cx + dx, sy + 7 + dy), fill=(*BEARD[:3], a))
+
+# ── sash ──────────────────────────────────────────────────────────────────────
+
+def draw_sash(draw, cx, waist_y):
+    poly(draw,
+         [(cx - 18, waist_y - 3), (cx + 18, waist_y - 3),
+          (cx + 20, waist_y + 9), (cx,      waist_y + 13),
+          (cx - 20, waist_y + 9)], SASH)
+    draw.line([(cx - 14, waist_y + 1), (cx + 14, waist_y + 1)],
+              fill=SASH_LIGHT, width=2)
+    poly(draw,
+         [(cx - 3, waist_y + 8), (cx + 7, waist_y + 8),
+          (cx + 4, waist_y + 22), (cx - 7, waist_y + 21)],
+         (*SASH[:3], 175))
 
 # ── torso ─────────────────────────────────────────────────────────────────────
 
-def draw_torso(draw, cx, cy, t):
-    wave = math.sin(t * 2 * math.pi) * 2
+def draw_torso(draw, cx, chest_y):
+    ell(draw, cx + 3, chest_y + 2, 26, 18, BODY_SHADOW)
+    ell(draw, cx,     chest_y,     24, 17, BODY_MID)
+    ell(draw, cx - 8, chest_y - 5, 12,  9, BODY_LIGHT)
+    ell(draw, cx - 5, chest_y - 9,  6,  5, BODY_BRIGHT)
+    belly_y = chest_y + 20
+    ell(draw, cx + 2, belly_y + 1, 18, 14, BODY_SHADOW)
+    ell(draw, cx,     belly_y,     17, 13, BODY_MID)
+    ell(draw, cx - 5, belly_y - 3,  8,  7, BODY_LIGHT)
 
-    # chest: wide muscular block
-    ell(draw, cx,   cy,    19, 22, SKIN_DARK)
-    ell(draw, cx,   cy-2,  17, 19, SKIN_MID)
-    # pec highlights
-    ell(draw, cx-6, cy-5,   7,  6, SKIN_LIGHT)
-    ell(draw, cx+6, cy-5,   6,  5, SKIN_MID)
+# ── arms ──────────────────────────────────────────────────────────────────────
 
-    # gold necklace across collarbone
-    nk_y = cy - 14
-    for dx in range(-12, 13):
-        dy = int(abs(dx) * 0.35)
-        draw.point((cx + dx, nk_y + dy), fill=NECKLACE)
-    # pendant gem
-    ell(draw, cx, nk_y+8, 5, 5, NECK_GEM)
-    ell(draw, cx-1, nk_y+7, 2, 2, (240, 100, 100, 255))
+def draw_arms_crossed(draw, cx, chest_y, t):
+    """Iconic crossed-arms genie pose."""
+    bob = int(math.sin(t * 2 * math.pi) * 1)
+    ay  = chest_y + 4 + bob
 
-    # arms
-    _draw_arms(draw, cx, cy, t)
+    # Right arm (underneath) — goes left across chest
+    thick_line(draw, cx + 24, ay - 2, cx + 10, ay + 6,  BODY_MID,   w=9)
+    thick_line(draw, cx + 10, ay + 6, cx - 12, ay + 9,  BODY_MID,   w=8)
+    ell(draw, cx - 14, ay + 10, 8, 7, BODY_LIGHT)
+    ell(draw, cx + 20, ay - 1,  7, 5, GOLD)
+    ell(draw, cx + 20, ay - 1,  5, 3, GOLD_LIGHT)
 
-def _draw_arms(draw, cx, cy, t):
-    wave = math.sin(t * 2 * math.pi)
-    for side in [-1, 1]:
-        bx = cx + side * 19
-        by = cy - 4
-        # upper arm — forearm bent outward to "hands on hips" pose
-        raise_off = int(wave * 3 * side)
-        elbow_x = bx + side * 13
-        elbow_y = by + 10 + raise_off
-        thick_line(draw, bx, by, elbow_x, elbow_y, SKIN_MID, w=7)
-        ell(draw, elbow_x, elbow_y, 5, 5, SKIN_MID)
-        # forearm going down-inward (hands on hips)
-        hand_x = elbow_x - side * 6
-        hand_y = elbow_y + 12
-        thick_line(draw, elbow_x, elbow_y, hand_x, hand_y, SKIN_MID, w=6)
-        ell(draw, hand_x, hand_y, 5, 5, SKIN_LIGHT)
-        # gold wristband
-        ell(draw, hand_x, hand_y - 3, 6, 4, NECKLACE)
+    # Left arm (on top) — goes right across chest
+    thick_line(draw, cx - 24, ay + 2, cx - 10, ay + 8,  BODY_LIGHT, w=9)
+    thick_line(draw, cx - 10, ay + 8, cx + 12, ay + 9,  BODY_MID,   w=8)
+    ell(draw, cx + 14, ay + 10, 8, 7, BODY_LIGHT)
+    ell(draw, cx - 20, ay + 2,  7, 5, GOLD)
+    ell(draw, cx - 20, ay + 2,  5, 3, GOLD_LIGHT)
 
-# ── sash + pants ──────────────────────────────────────────────────────────────
+def draw_arms_drifting(draw, cx, chest_y, t):
+    """Arms swaying — for drift/walk frames."""
+    swing = math.sin(t * 2 * math.pi) * 8
+    ay    = chest_y + 2
+    for sign in [-1, 1]:
+        sx = cx + sign * 24
+        ex = cx + sign * 18 + int(swing * sign * 0.4)
+        ey = ay + 16
+        thick_line(draw, sx, ay, ex, ey, BODY_MID, w=9)
+        fx = ex + int(swing * sign * 0.3)
+        fy = ey + 14
+        thick_line(draw, ex, ey, fx, fy, BODY_MID, w=8)
+        ell(draw, fx, fy + 2, 7, 6, BODY_LIGHT)
+        ell(draw, sx, ay, 7, 5, GOLD)
+        ell(draw, sx, ay, 5, 3, GOLD_LIGHT)
 
-def draw_lower(draw, cx, waist_y, t):
-    # orange sash wrapping the waist
-    sash_pts = [
-        (cx-18, waist_y-3),
-        (cx+18, waist_y-3),
-        (cx+20, waist_y+10),
-        (cx,    waist_y+14),
-        (cx-20, waist_y+10),
-    ]
-    poly(draw, sash_pts, SASH)
-    # sash overlap flap hanging down-left
-    flap = [
-        (cx-4, waist_y+8),
-        (cx+6, waist_y+8),
-        (cx+3, waist_y+24),
-        (cx-8, waist_y+22),
-    ]
-    poly(draw, flap, SASH_LAYER)
-    # sash highlight
-    draw.line([(cx-14, waist_y+1), (cx+14, waist_y+1)], fill=(240, 160, 50, 180), width=2)
+def draw_arms_grab(draw, cx, chest_y):
+    """Arms up — surprised/grabbed pose."""
+    ay = chest_y - 2
+    for sign in [-1, 1]:
+        sx = cx + sign * 22
+        ex = cx + sign * 30
+        ey = ay - 16
+        thick_line(draw, sx, ay, ex, ey, BODY_MID, w=9)
+        ell(draw, ex, ey - 2, 7, 6, BODY_LIGHT)
+        ell(draw, sx, ay,     7, 5, GOLD)
+        ell(draw, sx, ay,     5, 3, GOLD_LIGHT)
 
-    # baggy pants: two large rounded blobs for thighs + gathered ankles
-    for side in [-1, 1]:
-        px = cx + side * 9
-        # thigh bulge
-        ell(draw, px, waist_y+22, 12, 18, PANTS_LIGHT if side < 0 else PANTS)
-        ell(draw, px, waist_y+22, 10, 16, PANTS)
-        # crease highlights
-        ell(draw, px + side*3, waist_y+16, 4, 6, PANTS_LIGHT)
-        # gathered ankle band
-        ell(draw, px, waist_y+38, 8, 5, PANTS_DARK if side > 0 else PANTS)
+# ── poof ─────────────────────────────────────────────────────────────────────
 
-    # bare feet
-    for side in [-1, 1]:
-        fx = cx + side * 9
-        fy = waist_y + 46
-        ell(draw, fx, fy, 9, 5, SKIN_MID)
-        ell(draw, fx + side*6, fy, 4, 3, SKIN_MID)  # toes
-        ell(draw, fx - side*2, fy-1, 3, 2, SKIN_LIGHT)  # foot highlight
+def draw_poof(draw, cx, cy, t, expanding):
+    progress = t if expanding else (1 - t)
+    r_outer  = int(55 * progress)
+    for i in range(10):
+        angle  = i * math.pi * 0.2 + progress * math.pi
+        dist   = r_outer * (0.7 + 0.3 * math.sin(i * 1.3))
+        px     = cx + int(math.cos(angle) * dist)
+        py     = cy + int(math.sin(angle) * dist * 0.55)
+        blob_r = max(2, int(18 * (1 - progress * 0.6)))
+        alpha  = int(240 * progress if not expanding else 240 * (1 - progress * 0.3))
+        draw.ellipse([px - blob_r, py - blob_r, px + blob_r, py + blob_r],
+                     fill=(40, 100, 210, alpha))
+    flash = max(2, int(28 * (1 - progress) if expanding else 28 * progress))
+    draw.ellipse([cx - flash, cy - flash, cx + flash, cy + flash],
+                 fill=(130, 195, 255, int(200 * (1 - progress))))
+    for i in range(6):
+        angle = i * math.pi / 3 + progress * math.pi * 2
+        dist  = int(r_outer * 0.6)
+        sx    = cx + int(math.cos(angle) * dist)
+        sy    = cy + int(math.sin(angle) * dist * 0.6)
+        draw.point((sx, sy),     fill=GOLD_LIGHT)
+        draw.point((sx + 1, sy), fill=GOLD)
 
-PANTS_DARK = (10, 25, 90, 255)
-
-# ── walk legs ─────────────────────────────────────────────────────────────────
-
-def draw_walk_legs(draw, cx, waist_y, t):
-    # sash stays
-    sash_pts = [
-        (cx-18, waist_y-3),
-        (cx+18, waist_y-3),
-        (cx+20, waist_y+10),
-        (cx,    waist_y+14),
-        (cx-20, waist_y+10),
-    ]
-    poly(draw, sash_pts, SASH)
-    draw.line([(cx-14, waist_y+1), (cx+14, waist_y+1)], fill=(240, 160, 50, 180), width=2)
-
-    for side, phase in [(-1, 0), (1, math.pi)]:
-        swing = math.sin(t * 2 * math.pi + phase) * 0.5
-        seg   = 20
-        # thigh
-        kx = cx + side * 8 + int(math.sin(swing) * seg * 0.7)
-        ky = waist_y + int(math.cos(swing) * seg * 0.6) + 16
-        thick_line(draw, cx + side*8, waist_y+8, kx, ky, PANTS_LIGHT if side < 0 else PANTS, w=9)
-        ell(draw, kx, ky, 6, 6, PANTS)
-        # shin
-        swing2 = swing * 0.5
-        fx = kx + int(math.sin(swing2) * seg * 0.8)
-        fy = ky + int(math.cos(swing2) * seg * 0.6) + 4
-        thick_line(draw, kx, ky, fx, fy, PANTS, w=7)
-        # foot
-        ell(draw, fx, fy+2, 9, 5, SKIN_MID)
-        ell(draw, fx + side*5, fy+2, 4, 3, SKIN_MID)
-        ell(draw, fx - side*2, fy, 3, 2, SKIN_LIGHT)
-
-# ── assemble frame ────────────────────────────────────────────────────────────
+# ── assemble ──────────────────────────────────────────────────────────────────
 
 def make_frame(mode, frame_idx, total_frames):
     img  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     t   = frame_idx / max(total_frames - 1, 1)
-    cx  = W // 2 + 2   # slight right offset (earring hangs right)
-    bob = math.sin(t * 2 * math.pi) * 3
+    cx  = W // 2 + 1
+    bob = math.sin(t * 2 * math.pi) * 3.5
 
-    if mode == "poof_expand":
-        _poof(img, draw, cx, H//2, t, expanding=True)
-        return img
-    if mode == "poof_shrink":
-        _poof(img, draw, cx, H//2, t, expanding=False)
+    if mode in ("poof_expand", "poof_shrink"):
+        draw_poof(draw, cx, H // 2, t, expanding=(mode == "poof_expand"))
         return img
 
     if mode == "float":
-        head_cy  = int(H * 0.40 + bob)   # enough clearance for the tall hat above
-        torso_cy = head_cy + 28
-        waist_y  = torso_cy + 18
-        do_walk  = False
-    else:
-        head_cy  = int(H * 0.38)
-        torso_cy = head_cy + 28
-        waist_y  = torso_cy + 18
-        do_walk  = True
+        head_cy = int(62 + bob)
+        arm_fn  = lambda d, c, cy: draw_arms_crossed(d, c, cy, t)
+        tail_a  = 9
+    elif mode == "walk":
+        head_cy = int(60 + bob * 0.5)
+        arm_fn  = lambda d, c, cy: draw_arms_drifting(d, c, cy, t)
+        tail_a  = 14
+    else:  # grab
+        head_cy = int(62 + bob * 0.3)
+        arm_fn  = lambda d, c, cy: draw_arms_grab(d, c, cy)
+        tail_a  = 7
 
-    head_top = head_cy - 17
+    chest_y  = head_cy + 26
+    waist_y  = chest_y + 28
+    head_top = head_cy - 21
 
-    # 1. ambient glow
-    img = soft_glow(img, cx, torso_cy, 46, GLOW_COL)
+    img  = soft_glow(img, cx, chest_y, 52, GLOW_COL)
     draw = ImageDraw.Draw(img)
 
-    # 2. lower body (behind torso)
-    if do_walk:
-        draw_walk_legs(draw, cx, waist_y, t)
-    else:
-        draw_lower(draw, cx, waist_y, t)
-
-    # 3. torso + arms
-    draw_torso(draw, cx, torso_cy, t)
-
-    # 4. head
-    draw_head(draw, cx, head_cy, t)
-
-    # 5. hat (drawn last so it sits on top of head)
+    draw_smoke_tail(draw, cx, waist_y, t, amplitude=tail_a)
+    draw_sash(draw, cx, waist_y)
+    draw_torso(draw, cx, chest_y)
+    arm_fn(draw, cx, chest_y)
+    draw_head(draw, cx, head_cy)
+    draw_face(draw, cx, head_cy)
     draw_hat(draw, cx, head_top, t)
 
-    # soft edge blend
-    soft = img.filter(ImageFilter.GaussianBlur(radius=0.6))
-    img  = Image.blend(soft, img, 0.85)
-
+    soft = img.filter(ImageFilter.GaussianBlur(radius=0.7))
+    img  = Image.blend(soft, img, 0.82)
     return img
-
-
-def _poof(img, draw, cx, cy, t, expanding):
-    r = int((55 * t) if expanding else (55 * (1 - t)))
-    for i in range(8):
-        angle  = i * math.pi / 4 + t * math.pi
-        px     = cx + int(math.cos(angle) * r)
-        py     = cy + int(math.sin(angle) * r * 0.55)
-        blob_r = max(3, 16 - int(t * 10))
-        alpha  = int(230 * (1 - t) if expanding else 230 * t)
-        draw.ellipse([px-blob_r, py-blob_r, px+blob_r, py+blob_r],
-                     fill=(30, 90, 200, alpha))
-    flash_r = max(2, int(22 * (1-t) if expanding else 22*t))
-    draw.ellipse([cx-flash_r, cy-flash_r, cx+flash_r, cy+flash_r],
-                 fill=(120, 180, 255, int(190 * (1-t if expanding else t))))
 
 # ── generate ──────────────────────────────────────────────────────────────────
 
-SETS = {
-    "float":        6,
-    "walk":         6,
-    "poof_expand":  4,
-    "poof_shrink":  4,
-}
+SETS = {"float": 6, "walk": 6, "poof_expand": 4, "poof_shrink": 4}
+
+# grab — single tilted frame
+grab = make_frame("grab", 0, 1)
+grab = grab.rotate(-20, expand=False, fillcolor=(0, 0, 0, 0))
+grab.save(os.path.join(OUTDIR, "grab_00.png"))
+print("  grab_00.png")
 
 for mode, n in SETS.items():
     for i in range(n):
@@ -346,4 +328,4 @@ for mode, n in SETS.items():
         frame.save(path)
         print(f"  {path}")
 
-print(f"\ndone. {sum(SETS.values())} frames in {OUTDIR}")
+print(f"\ndone. {sum(SETS.values()) + 1} frames in {OUTDIR}")

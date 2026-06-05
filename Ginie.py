@@ -931,7 +931,7 @@ class PetWindow(Gtk.Window):
         self.fs_walk_l      = load_set("walk",         flip=True)
         self.fs_poof_expand = load_set("poof_expand",  flip=False)
         self.fs_poof_shrink = load_set("poof_shrink",  flip=False)
-        self.fs_grab        = load_set("float",        flip=False, tilt=18)
+        self.fs_grab        = load_set("grab",         flip=False)
 
         if not self.fs_float_r:
             raise RuntimeError(f"no float frames found in {FRAMES_DIR}")
