@@ -1016,7 +1016,15 @@ class PetWindow(Gtk.Window):
         dt  = min(now - self._last_t, 0.05)
         self._last_t = now
 
-        if self._state != DRAGGED:
+        if self._state == DRAGGED:
+            # begin_move_drag lets the WM eat the button-release — detect it here
+            ptr = Gdk.Display.get_default().get_default_seat().get_pointer()
+            _win, _x, _y, mods = self.get_window().get_device_position(ptr)
+            if not (mods & Gdk.ModifierType.BUTTON1_MASK):
+                wx, wy = self.get_position()
+                self.x, self.y = float(wx), float(wy)
+                self._try_throw()
+        else:
             self._update_state(now, dt)
 
         self._trail.tick(now)
