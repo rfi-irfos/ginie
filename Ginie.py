@@ -725,9 +725,11 @@ class ChatWindow(Gtk.Window):
 # ---------------------------------------------------------------------------
 
 FLOATING = "floating"    # hovering drift — default mode
+HOVERING = "hovering"    # bob in place, no translation
 WALKING  = "walking"     # legs out, walking along screen bottom area
 POOFING  = "poofing"     # teleport sequence
 GHOSTING = "ghosting"    # invisible walk — only footsteps visible, poof re-appear
+SPAWNING = "spawning"    # materialise from Z_MIN on first launch
 DRAGGED  = "dragged"     # user is dragging
 THROWN   = "thrown"      # released from drag with velocity — momentum + bounce
 
@@ -743,9 +745,12 @@ ANIM_FLOAT_MS = 110   # float cycle
 ANIM_WALK_MS  =  85   # walk cycle
 ANIM_POOF_MS  =  65   # poof frames
 
-Z_MIN   = 0.08   # deepest-into-screen scale — really tiny dot
-Z_MAX   = 2.5    # closest-to-viewer scale — right in your face (2x source = crisp)
-Z_SPEED = 0.50   # z-units per second when vz=1.0
+Z_MIN          = 0.08   # deepest-into-screen — tiny dot
+Z_MAX          = 2.5    # closest — right in your face
+Z_SPEED        = 0.50   # z-units/sec at vz=1.0
+Z_NEUTRAL      = 0.50   # resting size (240×320 native → ~120×160 on screen)
+Z_RETURN_SPEED = 0.12   # how fast z drifts back to Z_NEUTRAL when not moving in z
+SPAWN_SECS     = 1.6    # seconds for materialise-from-depth spawn
 
 # Drift directions — (vx, vy, vz).  vz>0 = toward viewer, vz<0 = into screen.
 _FLOAT_DIRS = [
@@ -968,8 +973,10 @@ class PetWindow(Gtk.Window):
         self.sh = screen.get_height()
 
         self._margin = 90
-        self.x = float(self.sw // 2)
-        self.y = float(self.sh // 2)    # start mid-screen — genie floats anywhere
+        # spawn in the center 60% of screen so he's always visible
+        m = self._margin + 80
+        self.x = float(random.uniform(self.sw * 0.25, self.sw * 0.75))
+        self.y = float(random.uniform(self.sh * 0.25, self.sh * 0.65))
 
         # velocity
         self._vx = 0.0
@@ -977,8 +984,8 @@ class PetWindow(Gtk.Window):
         self._vz = 0.0
         self._facing_right = True
 
-        # depth / z-axis — start at 0.5 so default display ≈ 120×160 px
-        self.z        = 0.5     # 1.0 = native sprite size (240×320)
+        # depth / z-axis — spawn starts tiny, materialises to Z_NEUTRAL
+        self.z        = Z_MIN   # will grow to Z_NEUTRAL during SPAWNING
         self._disp_w  = SPR_W   # current window pixel width
         self._disp_h  = SPR_H   # current window pixel height
 
@@ -990,11 +997,12 @@ class PetWindow(Gtk.Window):
         self._poof_target_y   = 0.0
         self._ghost_after_poof = False   # if True: go invisible after expand
 
-        # state — spawn with a poof-in, then immediately start moving
-        self._state            = POOFING
-        self._poof_step        = 1   # start on shrink (appear from nothing)
+        # state — materialise from depth on first launch
+        self._state            = SPAWNING
+        self._spawn_start      = time.monotonic()
+        self._poof_step        = 1
         self._ghost_after_poof = False
-        self._state_end        = time.monotonic()
+        self._state_end        = time.monotonic() + SPAWN_SECS
         self.frame_set         = self.fs_poof_shrink
         self.frame_idx         = 0
 
@@ -1103,6 +1111,36 @@ class PetWindow(Gtk.Window):
 
     def _update_state(self, now, dt):
 
+        if self._state == SPAWNING:
+            self._anim_ms = ANIM_POOF_MS
+            elapsed  = now - self._spawn_start
+            progress = min(1.0, elapsed / SPAWN_SECS)
+            # ease-out quadratic: fast zoom then settles
+            eased    = 1.0 - (1.0 - progress) ** 2
+            self.z   = Z_MIN + (Z_NEUTRAL - Z_MIN) * eased
+            if progress >= 1.0:
+                self.z = Z_NEUTRAL
+                self._start_float()
+                GLib.timeout_add(300, self._greet)
+            return
+
+        if self._state == HOVERING:
+            self._anim_ms = ANIM_FLOAT_MS
+            fs = self.fs_float_r if self._facing_right else self.fs_float_l
+            if self.frame_set is not fs:
+                self.frame_set = fs
+            self._bob_phase += dt * 1.8
+            bob_y = _math.sin(self._bob_phase) * 5
+            # drift z back toward neutral while hovering
+            self.z += (Z_NEUTRAL - self.z) * Z_RETURN_SPEED * dt * 3
+            # tiny xy drift so he doesn't look completely frozen
+            ix, iy = int(self.x), int(self.y)
+            self.move(ix, iy)
+            self._bubble.follow(ix, iy)
+            if now >= self._state_end:
+                self._pick_next_move(now)
+            return
+
         if self._state == FLOATING:
             self._anim_ms = ANIM_FLOAT_MS
 
@@ -1124,6 +1162,10 @@ class PetWindow(Gtk.Window):
                 fs = self.fs_float_l
             if self.frame_set is not fs:
                 self.frame_set = fs
+
+            # when not moving in z, slowly return to natural size
+            if abs(self._vz) < 0.05:
+                self.z += (Z_NEUTRAL - self.z) * Z_RETURN_SPEED * dt
 
             # sinusoidal bob overlaid on directional drift
             self._bob_phase += dt * 1.8
@@ -1251,9 +1293,10 @@ class PetWindow(Gtk.Window):
             if self._throw_speed < 25:
                 self._start_float()
 
-        # inactivity: if parked as floating with no velocity, nudge or sleep
+        # inactivity: nudge or sleep when idle
         user_away = (now - self._last_user_action) > INACTIVITY_WANDER_S
-        if user_away and self._state == FLOATING and self._vx == 0 and self._vy == 0:
+        still = self._state in (FLOATING, HOVERING) and self._vx == 0 and self._vy == 0
+        if user_away and still:
             asleep = (now - self._last_user_action) > 60
             if asleep:
                 fs = self.fs_sleep
@@ -1270,13 +1313,14 @@ class PetWindow(Gtk.Window):
         return nx, ny
 
     def _pick_next_move(self, now):
-        """Decide what to do next: walk, float, poof, or ghost walk."""
         roll = random.random()
-        if roll < 0.40:
+        if roll < 0.30:
             self._start_walk()
-        elif roll < 0.65:
+        elif roll < 0.52:
             self._start_float()
-        elif roll < 0.85:
+        elif roll < 0.67:
+            self._start_hover()       # bob in place
+        elif roll < 0.83:
             self._start_poof()
         else:
             self._start_ghost()
@@ -1287,13 +1331,32 @@ class PetWindow(Gtk.Window):
         self._prev_ty = self.y
 
     def _start_float(self):
-        vx, vy, vz = random.choice(_FLOAT_DIRS)
+        # filter directions: when near an edge, only allow inward-pointing ones
+        cx_n = (self.x - self.sw * 0.5) / (self.sw * 0.5)   # -1..+1
+        cy_n = (self.y - self.sh * 0.5) / (self.sh * 0.5)
+        threshold = 0.55
+        candidates = [d for d in _FLOAT_DIRS
+                      if not (cx_n >  threshold and d[0] >  0.2)
+                      and not (cx_n < -threshold and d[0] < -0.2)
+                      and not (cy_n >  threshold and d[1] >  0.2)
+                      and not (cy_n < -threshold and d[1] < -0.2)] or list(_FLOAT_DIRS)
+        vx, vy, vz = random.choice(candidates)
         self._vx = vx
         self._vy = vy
         self._vz = vz
         self._facing_right = vx >= 0
         self._state     = FLOATING
         self._state_end = time.monotonic() + random.uniform(*FLOAT_SECS)
+        self.frame_idx  = 0
+        self._reset_trail_pos()
+
+    def _start_hover(self):
+        """Bob in place for a few seconds — feels contemplative."""
+        self._vx = 0.0
+        self._vy = 0.0
+        self._vz = 0.0
+        self._state     = HOVERING
+        self._state_end = time.monotonic() + random.uniform(2.0, 5.0)
         self.frame_idx  = 0
         self._reset_trail_pos()
 
