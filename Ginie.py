@@ -2390,7 +2390,7 @@ class PetWindow(Gtk.Window):
             menu.append(it)
         menu.append(Gtk.SeparatorMenuItem())
         quit_it = Gtk.MenuItem(label="Beenden")
-        quit_it.connect("activate", lambda *_: (self._trail.hide_all(), Gtk.main_quit()))
+        quit_it.connect("activate", lambda *_: quit_ginie(self))
         menu.append(quit_it)
         menu.show_all()
         menu.popup(None, None, None, None, ev.button, ev.time)
@@ -2541,6 +2541,105 @@ class BubbleWindow(Gtk.Window):
         return False
 
 # ---------------------------------------------------------------------------
+# Clean shutdown + system tray
+# ---------------------------------------------------------------------------
+
+def quit_ginie(pet=None):
+    """Tidy exit: clear footprints, hide the bubble, stop the ollama instance WE
+    started (never the user's system daemon), then drop the GTK loop. The
+    single-instance lock is released by the atexit hook."""
+    try:
+        if pet is not None:
+            pet._trail.hide_all()
+            pet._bubble.hide()
+    except Exception:
+        pass
+    try:
+        _kill_ginie_ollama()   # only matches /tmp/ginie_ollama_bin — safe
+    except Exception:
+        pass
+    Gtk.main_quit()
+
+def _ensure_tray_icon():
+    """Render a small square tray icon (head + hat) from a sprite frame, once."""
+    out = os.path.expanduser("~/.config/ginie/tray.png")
+    try:
+        if os.path.exists(out):
+            return out
+        src_path = os.path.join(FRAMES_DIR, "float_00.png")
+        if not os.path.exists(src_path):
+            return None
+        img  = Image.open(src_path).convert("RGBA")
+        w, h = img.size
+        crop = img.crop((0, 0, w, w))                       # top square = head + hat
+        crop = crop.resize((64, 64), Image.Resampling.LANCZOS)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        crop.save(out)
+        return out
+    except Exception:
+        return None
+
+def _tray_menu(pet):
+    menu = Gtk.Menu()
+    def item(label, fn):
+        it = Gtk.MenuItem(label=label)
+        it.connect("activate", lambda *_: fn())
+        menu.append(it)
+    item("Mit Ginie reden",   pet._open_chat)
+    item("Wecken / Erkunden", lambda: (pet._wake(), pet._start_explore()))
+    item("In Ordner tauchen", pet._start_dive)
+    item("DVD-Modus",         pet._start_dvd)
+    menu.append(Gtk.SeparatorMenuItem())
+    item("Ginie beenden",     lambda: quit_ginie(pet))
+    menu.show_all()
+    return menu
+
+def build_tray(pet):
+    """System-tray quit affordance. Prefers AppIndicator (the modern StatusNotifier
+    path GNOME shows via its AppIndicator extension, enabled by default on Ubuntu),
+    falls back to the legacy Gtk.StatusIcon."""
+    icon = _ensure_tray_icon()
+    icon_dir  = os.path.dirname(icon) if icon else None
+    icon_name = os.path.splitext(os.path.basename(icon))[0] if icon else "face-smile"
+
+    for lib in ("AyatanaAppIndicator3", "AppIndicator3"):
+        try:
+            gi.require_version(lib, "0.1")
+            repo = __import__("gi.repository", fromlist=[lib])
+            AI   = getattr(repo, lib)
+            ind  = AI.Indicator.new("ginie", icon_name,
+                                    AI.IndicatorCategory.APPLICATION_STATUS)
+            if icon_dir:
+                ind.set_icon_theme_path(icon_dir)
+                ind.set_icon_full(icon_name, "Ginie")
+            ind.set_title("Ginie")
+            ind.set_status(AI.IndicatorStatus.ACTIVE)
+            ind.set_menu(_tray_menu(pet))
+            print(f"[ginie] tray icon active via {lib}")
+            return ind
+        except (ValueError, ImportError, AttributeError):
+            continue
+
+    try:
+        si = Gtk.StatusIcon()
+        if icon:
+            si.set_from_file(icon)
+        else:
+            si.set_from_icon_name("face-smile")
+        si.set_tooltip_text("Ginie — Rechtsklick fuer Menue")
+        si.set_title("Ginie")
+        menu = _tray_menu(pet)
+        si.connect("popup-menu",
+                   lambda i, b, t: menu.popup(None, None,
+                       Gtk.StatusIcon.position_menu, i, b, t))
+        si.connect("activate", lambda *_: pet._open_chat())
+        print("[ginie] tray icon active via Gtk.StatusIcon")
+        return si
+    except Exception as e:
+        print(f"[ginie] tray unavailable ({e}) — quit via right-click on Ginie")
+        return None
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2549,4 +2648,5 @@ if __name__ == "__main__":
     apply_css()
     threading.Thread(target=ensure_ollama, daemon=True).start()
     pet = PetWindow()
+    pet._tray = build_tray(pet)   # keep a reference so the icon isn't GC'd
     Gtk.main()

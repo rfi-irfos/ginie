@@ -21,10 +21,15 @@ plug in usb  ->  bash START_ASSISTANT.sh  ->  working AI agent
 If you just want to build and run Ginie directly on your Linux machine:
 
 ```bash
-sudo apt install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 && pip install pillow && git clone https://github.com/rfi-irfos/ginie ~/ginie && python3 ~/ginie/gen_sprites.py && mkdir -p ~/.local/bin && printf '#!/usr/bin/env bash\nexec python3 ~/ginie/Ginie.py "$@"\n' > ~/.local/bin/ginie && chmod +x ~/.local/bin/ginie && grep -q 'local/bin' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && echo "done — open a new terminal and type: ginie"
+sudo apt install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 && pip install pillow && git clone https://github.com/rfi-irfos/ginie ~/ginie && python3 ~/ginie/gen_sprites.py && mkdir -p ~/.local/bin && printf '#!/usr/bin/env bash\nexec python3 ~/ginie/Ginie.py "$@"\n' > ~/.local/bin/ginie && chmod +x ~/.local/bin/ginie && grep -q 'local/bin' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && echo "done — open a new terminal and type: ginie"
 ```
 
 Open a new terminal after running that, then just type `ginie`.
+
+`gir1.2-ayatanaappindicator3-0.1` powers the system-tray icon (quit Ginie from the
+top bar). It is optional — without it Ginie still runs; you just quit via
+right-click on the genie instead. On Wayland it shows via GNOME's AppIndicator
+extension (enabled by default on Ubuntu).
 
 > Ollama + model weights are optional for the desktop pet — the sprite, animations,
 > and right-click menu all work without them. Chat will show "offline" until Ollama
