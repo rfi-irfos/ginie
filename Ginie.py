@@ -729,6 +729,7 @@ WALKING  = "walking"     # legs out, walking along screen bottom area
 POOFING  = "poofing"     # teleport sequence
 GHOSTING = "ghosting"    # invisible walk — only footsteps visible, poof re-appear
 DRAGGED  = "dragged"     # user is dragging
+THROWN   = "thrown"      # released from drag with velocity — momentum + bounce
 
 import math as _math
 
@@ -783,7 +784,13 @@ class TrailOverlay(Gtk.Window):
         self.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
         self.set_app_paintable(True)
         screen = Gdk.Screen.get_default()
-        sw, sh = screen.get_width(), screen.get_height()
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        if monitor:
+            geo = monitor.get_geometry()
+            sw, sh = geo.width, geo.height
+        else:
+            sw, sh = screen.get_width(), screen.get_height()
         self.set_default_size(sw, sh)
         self.move(0, 0)
         self._composited = screen.is_composited()
@@ -976,12 +983,16 @@ class PetWindow(Gtk.Window):
         self._prev_tx          = self.x   # previous position for trail delta
         self._prev_ty          = self.y
 
-        # drag
-        self._drag_ox  = 0.0
-        self._drag_oy  = 0.0
-        self._press_x  = 0.0
-        self._press_y  = 0.0
-        self._did_drag = False
+        # drag + throw
+        self._drag_ox      = 0.0
+        self._drag_oy      = 0.0
+        self._press_x      = 0.0
+        self._press_y      = 0.0
+        self._did_drag     = False
+        self._drag_samples = []   # (time, x, y) ring for velocity estimation
+        self._throw_vx     = 0.0
+        self._throw_vy     = 0.0
+        self._throw_speed  = 0.0
 
         self._chat   = None
         self._bubble = BubbleWindow(self)
@@ -1149,6 +1160,29 @@ class PetWindow(Gtk.Window):
                     self._trail.drop(self.x, self.y)
                 self._prev_tx, self._prev_ty = self.x, self.y
 
+        elif self._state == THROWN:
+            self._anim_ms  = ANIM_FLOAT_MS
+            fs = self.fs_float_r if self._throw_vx >= 0 else self.fs_float_l
+            if self.frame_set is not fs:
+                self.frame_set = fs
+
+            nx = self.x + self._throw_vx * self._throw_speed * dt
+            ny = self.y + self._throw_vy * self._throw_speed * dt
+            clamped = self._clamp(nx, ny)
+            # bounce off walls
+            if clamped[0] != nx:
+                self._throw_vx   *= -1
+                self._facing_right = self._throw_vx >= 0
+            if abs(clamped[1] - ny) > 2:
+                self._throw_vy *= -1
+            self.x, self.y = clamped
+            self.move(int(self.x), int(self.y))
+            self._bubble.follow(int(self.x), int(self.y))
+            # dampen; switch to normal float when slow
+            self._throw_speed *= max(0.0, 1.0 - 3.0 * dt)
+            if self._throw_speed < 25:
+                self._start_float()
+
         # inactivity: if parked as floating with no velocity, nudge after timeout
         user_away = (now - self._last_user_action) > INACTIVITY_WANDER_S
         if user_away and self._state == FLOATING and self._vx == 0 and self._vy == 0:
@@ -1246,13 +1280,21 @@ class PetWindow(Gtk.Window):
             ix, iy = int(self.x), int(self.y)
             self.move(ix, iy)
             self._bubble.follow(ix, iy)
+            # track velocity for throw physics
+            now = time.monotonic()
+            self._drag_samples.append((now, self.x, self.y))
+            if len(self._drag_samples) > 6:
+                self._drag_samples.pop(0)
+            # glow trail while dragging
+            self._trail._overlay.add(ix + SPR_W // 2, iy + SPR_H // 2,
+                                     TrailOverlay.KIND_GLOW)
 
     def _on_release(self, widget, ev):
         if ev.button != 1:
             return
         self._last_user_action = time.monotonic()
         if self._did_drag:
-            self._start_float()
+            self._try_throw()
         else:
             # click: stop and open chat
             self._vx = self._vy = 0.0
@@ -1261,6 +1303,31 @@ class PetWindow(Gtk.Window):
             self.frame_set  = self.fs_float_r if self._facing_right else self.fs_float_l
             self.frame_idx  = 0
             self._open_chat()
+
+    def _try_throw(self):
+        """Compute drag velocity from samples; if fast enough enter THROWN, else float."""
+        self._drag_samples = [s for s in self._drag_samples
+                              if time.monotonic() - s[0] < 0.15]
+        if len(self._drag_samples) >= 2:
+            t1, x1, y1 = self._drag_samples[0]
+            t2, x2, y2 = self._drag_samples[-1]
+            dt = max(t2 - t1, 0.001)
+            vx = (x2 - x1) / dt
+            vy = (y2 - y1) / dt
+            speed = _math.hypot(vx, vy)
+            if speed > 80:
+                self._throw_vx    = vx / speed
+                self._throw_vy    = vy / speed
+                self._throw_speed = min(speed * 0.5, 500)
+                self._facing_right = self._throw_vx >= 0
+                self._state       = THROWN
+                self.frame_set    = (self.fs_float_r if self._facing_right
+                                     else self.fs_float_l)
+                self.frame_idx    = 0
+                self._drag_samples.clear()
+                return
+        self._drag_samples.clear()
+        self._start_float()
 
     def _show_menu(self, ev):
         menu = Gtk.Menu()
