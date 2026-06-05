@@ -981,8 +981,6 @@ class PetWindow(Gtk.Window):
         # drag + throw
         self._press_x      = 0.0
         self._press_y      = 0.0
-        self._press_wx     = 0.0
-        self._press_wy     = 0.0
         self._did_drag     = False
         self._drag_samples = []   # (time, x, y) ring for velocity estimation
         self._throw_vx     = 0.0
@@ -993,6 +991,7 @@ class PetWindow(Gtk.Window):
         self._bubble = BubbleWindow(self)
         self._trail  = TrailManager()
 
+        self.connect("configure-event", self._on_configure)
         self.move(int(self.x), int(self.y))
         self.show_all()
 
@@ -1256,7 +1255,6 @@ class PetWindow(Gtk.Window):
         self._last_user_action = time.monotonic()
         self._press_x = ev.x_root
         self._press_y = ev.y_root
-        self._press_wx, self._press_wy = self.get_position()  # window pos at moment of click
         self._did_drag = False
         if ev.button == 3:
             self._show_menu(ev)
@@ -1264,32 +1262,42 @@ class PetWindow(Gtk.Window):
     def _on_motion(self, widget, ev):
         if not (ev.state & Gdk.ModifierType.BUTTON1_MASK):
             return
-        if abs(ev.x_root - self._press_x) > 5 or abs(ev.y_root - self._press_y) > 5:
-            self._did_drag = True
-        if self._did_drag:
-            self._state    = DRAGGED
-            self._vx = self._vy = 0.0
-            self.frame_set = self.fs_grab
-            # delta drag: coordinate-space agnostic — works on any monitor
-            self.x = self._press_wx + (ev.x_root - self._press_x)
-            self.y = self._press_wy + (ev.y_root - self._press_y)
-            ix, iy = int(self.x), int(self.y)
-            self.move(ix, iy)
-            self._bubble.follow(ix, iy)
-            # track velocity for throw physics
-            now = time.monotonic()
-            self._drag_samples.append((now, self.x, self.y))
-            if len(self._drag_samples) > 6:
-                self._drag_samples.pop(0)
-            # glow trail while dragging
-            self._trail._overlay.add(ix + SPR_W // 2, iy + SPR_H // 2,
-                                     TrailOverlay.KIND_GLOW)
+        if not self._did_drag:
+            if abs(ev.x_root - self._press_x) > 5 or abs(ev.y_root - self._press_y) > 5:
+                self._did_drag = True
+                self._state    = DRAGGED
+                self._vx = self._vy = 0.0
+                self.frame_set = self.fs_grab
+                self.frame_idx = 0
+                self._drag_samples.clear()
+                # hand drag to WM — works on X11 and Wayland, no move() needed
+                self.get_window().begin_move_drag(
+                    1, int(ev.x_root), int(ev.y_root), ev.time
+                )
+
+    def _on_configure(self, widget, ev):
+        """Fires whenever the WM moves/resizes the window — used to track drag position."""
+        if self._state != DRAGGED:
+            return False
+        self.x = float(ev.x)
+        self.y = float(ev.y)
+        now = time.monotonic()
+        self._drag_samples.append((now, self.x, self.y))
+        if len(self._drag_samples) > 6:
+            self._drag_samples.pop(0)
+        self._trail._overlay.add(int(self.x) + SPR_W // 2, int(self.y) + SPR_H // 2,
+                                 TrailOverlay.KIND_GLOW)
+        self._bubble.follow(int(self.x), int(self.y))
+        return False
 
     def _on_release(self, widget, ev):
         if ev.button != 1:
             return
         self._last_user_action = time.monotonic()
         if self._did_drag:
+            # sync position from actual window location after WM drag
+            wx, wy = self.get_position()
+            self.x, self.y = float(wx), float(wy)
             self._try_throw()
         else:
             # click: stop and open chat
@@ -1464,24 +1472,24 @@ class BubbleWindow(Gtk.Window):
         GLib.idle_add(self._do_reposition, px, py)
 
     def _do_reposition(self, px, py):
-        # Use natural size — never resize(1,1) which races layout and clips the tail
-        _, nat = self.get_preferred_size()
-        w = max(nat.width,  180)
-        h = max(nat.height, 60)
+        h = self.get_allocated_height()
+        w = self.get_allocated_width()
+        if h < 20:
+            # layout not settled yet — retry next idle
+            GLib.idle_add(self._do_reposition, px, py)
+            return False
+        w = max(w, 180)
 
         sw = Gdk.Screen.get_default().get_width()
 
-        # center bubble horizontally over the genie sprite
         genie_cx = px + SPR_W // 2
         bx = genie_cx - w // 2
 
-        # tail tip sits just above the hat (hat tip ~top of sprite window + small gap)
-        by = py - h - 8
+        # tail tip sits just above the sprite top (hat tip), with a small gap
+        by = py - h - 6
 
-        # clamp to screen
         bx = max(6, min(bx, sw - w - 6))
 
-        # if no room above, flip below the genie
         if by < 6:
             by = py + SPR_H + 6
 
