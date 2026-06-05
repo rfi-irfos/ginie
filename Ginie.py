@@ -743,9 +743,9 @@ ANIM_FLOAT_MS = 110   # float cycle
 ANIM_WALK_MS  =  85   # walk cycle
 ANIM_POOF_MS  =  65   # poof frames
 
-Z_MIN   = 0.35   # deepest-into-screen scale
-Z_MAX   = 2.0    # closest-to-viewer scale
-Z_SPEED = 0.32   # z-units per second when vz=1.0
+Z_MIN   = 0.12   # deepest-into-screen scale — really tiny dot
+Z_MAX   = 2.8    # closest-to-viewer scale — right in your face
+Z_SPEED = 0.50   # z-units per second when vz=1.0
 
 # Drift directions — (vx, vy, vz).  vz>0 = toward viewer, vz<0 = into screen.
 _FLOAT_DIRS = [

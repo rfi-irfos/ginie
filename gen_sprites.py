@@ -155,8 +155,6 @@ def draw_hat(draw, cx, head_top, t):
     poly(draw, [(tip_x,     tip_y + 3), (cx - 4, base_y), (cx + 4, base_y)], HAT_LIGHT)
 
     draw.rectangle([cx - bw - 1, base_y - 5, cx + bw + 1, base_y + 5], fill=HAT_BAND)
-    ell(draw, cx, base_y, 6, 6, HAT_GEM)
-    ell(draw, cx - 1, base_y - 1, 2, 2, (255, 115, 115, 255))
 
     ell(draw, tip_x, tip_y, 3, 3, GOLD)
     for ang in [0, 90, 180, 270]:
@@ -173,12 +171,9 @@ def draw_head(draw, cx, cy):
     ell(draw, cx - 8, cy - 2, 11, 9, BODY_LIGHT)
     ell(draw, cx - 4, cy - 10, 6, 5, BODY_BRIGHT)
 
-    # Right ear + earring
+    # Right ear (no earring)
     ell(draw, cx + r - 2, cy + 3, 5, 7, BODY_MID)
     ell(draw, cx + r - 1, cy + 3, 3, 5, BODY_LIGHT)
-    draw.line([(cx + r + 2, cy + 6), (cx + r + 3, cy + 13)], fill=GOLD, width=2)
-    ell(draw, cx + r + 3, cy + 15, 4, 4, GOLD)
-    ell(draw, cx + r + 3, cy + 15, 2, 2, GOLD_LIGHT)
 
 def draw_face(draw, cx, cy, expression="smirk"):
     if expression == "smirk":
